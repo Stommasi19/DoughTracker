@@ -43,21 +43,21 @@ function App({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [currency, setCurrency] = useState("USD");
+  const [currency, setCurrency] = useState("");
   const [selectedTransaction, setSelectedTransaction] =
     useState<Transaction | null>(null);
   const [editingCategory, setEditingCategory] = useState("");
   const currentRequest = useRef("");
   const dialog = useRef<HTMLDialogElement>(null);
   const hasFilters = Boolean(
-    accountId || categoryId || currency !== "USD" || (page === "transactions" && search),
+    accountId || categoryId || (currency && currency !== data?.defaultCurrency) || (page === "transactions" && search),
   );
   const params = new URLSearchParams();
   if (month) params.set("month", month);
   if (accountId) params.set("accountId", accountId);
   if (categoryId) params.set("categoryId", categoryId);
   if (page === "transactions" && search) params.set("search", search);
-  params.set("currency", currency);
+  if (currency) params.set("currency", currency);
   const requestPath = params.toString();
   const requestKey = `${requestPath}|${page}|${refresh}`;
   const loading = completedRequest !== requestKey;
@@ -141,7 +141,7 @@ function App({
     setAccountId("");
     setCategoryId("");
     setSearch("");
-    setCurrency("USD");
+    setCurrency("");
   }
   function viewCategory(id: string) {
     setCategoryId(id);
@@ -152,6 +152,7 @@ function App({
     const key = currentRequest.current;
     const filters = new URLSearchParams(requestPath);
     filters.set("month", data.month);
+    filters.set("currency", data.currency);
     filters.set("page", String(Math.floor(data.transactions.length / 20) + 1));
     setBusy(true);
     setError("");
@@ -180,11 +181,7 @@ function App({
         ? "The details behind your spending."
         : "Your accounts, together in one place.";
   const report = data?.report;
-  const previousMonth = data
-    ? new Date(`${data.month}-01T12:00:00`)
-    : new Date();
-  previousMonth.setMonth(previousMonth.getMonth() - 1);
-  const priorMonthName = previousMonth.toLocaleDateString("en-US", {
+  const priorMonthName = report && new Date(`${report.previousDateFrom}T12:00:00`).toLocaleDateString("en-US", {
     month: "long",
   });
 
@@ -359,7 +356,7 @@ function App({
                     value={month || data.month}
                     onChange={(event) => setMonth(event.target.value)}
                   >
-                    {data.months.map((item) => (
+                    {[...new Set([data.month, ...data.months])].sort().reverse().map((item) => (
                       <option key={item} value={item}>
                         {monthName(item)}
                       </option>
@@ -411,18 +408,18 @@ function App({
                     Clear filters
                   </button>
                 )}
-                {(data.currencies.length > 1 || currency !== "USD") && (
+                {data.currencies.length > 1 && (
                   <label className="filter-label">
                     <span>Currency</span>
-                    <select aria-label="Currency" value={currency} onChange={event => setCurrency(event.target.value)}>
-                      {[...new Set([currency, "USD", ...data.currencies])].map(code => <option key={code} value={code}>{code}</option>)}
+                    <select aria-label="Currency" value={currency || data.currency} onChange={event => setCurrency(event.target.value)}>
+                      {[...new Set([data.currency, ...data.currencies])].map(code => <option key={code} value={code}>{code}</option>)}
                     </select>
                   </label>
                 )}
                 <span className="filter-end" role="status">
                   {loading
                     ? "Updating…"
-                    : `${monthName(data.month, true)} 1–${report?.daily.length}, ${data.month.slice(0, 4)}`}
+                    : `${dateName(data.report.dateFrom)}–${dateName(data.report.daily.at(-1)!.date)}, ${data.report.dateFrom.slice(0, 4)}`}
                 </span>
               </div>
             )}
@@ -568,7 +565,7 @@ function App({
                   <section className="history-section">
                     <div>
                       <h2>The bigger picture</h2>
-                      <p>Six months of posted spending</p>
+                      <p>{report.trend.length} months of posted spending</p>
                     </div>
                     <div className="month-history">
                       {report.trend.map((item) => (
@@ -676,16 +673,16 @@ function App({
                           <div>
                             <h2>{institution.name}</h2>
                             <p>
-                              {connected && connection.lastSyncAt
+                              {connection.lastSyncAt
                                 ? `Last successful sync ${new Date(connection.lastSyncAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`
-                                : connected ? "No successful sync recorded" : "Disconnected · Your imported history is retained"}
+                                : "No successful sync recorded"}
                             </p>
                           </div>
                           <span
                             className={`connection-badge ${connected ? "" : "disconnected"}`}
                           >
                             <span className="status-dot" />
-                            {connected ? "Connected" : "Disconnected"}
+                            {connection.status.replaceAll("_", " ").replace(/^./, letter => letter.toUpperCase())}
                           </span>
                         </div>
                         <div className="account-list">
@@ -695,11 +692,7 @@ function App({
                               <div className="account-identity">
                                 <strong>{account.name}</strong>
                                 <span>
-                                  {account.subtype === "credit card"
-                                    ? "Credit card"
-                                    : account.subtype === "savings"
-                                      ? "Savings"
-                                      : "Checking"}{" "}
+                                  {(account.subtype || account.type).replaceAll("_", " ").replace(/^./, letter => letter.toUpperCase())}{" "}
                                   · •• {account.mask ?? "—"}
                                 </span>
                               </div>
@@ -758,8 +751,9 @@ function App({
                 <span>A little more clarity.</span>
               </span>
               <span>
-                {data.seeded ? "Sample history through" : "Workspace as of"} {dateName(data.asOf)},{" "}
-                {data.asOf.slice(0, 4)}
+                {data.asOf
+                  ? `${data.seeded ? "Sample history through" : "History through"} ${dateName(data.asOf)}, ${data.asOf.slice(0, 4)}`
+                  : "No transaction history yet"}
               </span>
             </footer>
           </>

@@ -1,4 +1,5 @@
 using System.Linq.Expressions;
+using System.Globalization;
 using Application;
 using Domain;
 using Microsoft.EntityFrameworkCore;
@@ -31,6 +32,21 @@ public sealed class LedgerStore(LedgerDbContext db) : ILedgerStore
 
     public Task<DemoCategory[]> Categories(CancellationToken ct) => db.Categories.AsNoTracking()
         .OrderBy(c => c.Name).Select(c => new DemoCategory(c.Id, c.Name)).ToArrayAsync(ct);
+
+    public async Task<WorkspaceMetadata> Workspace(string owner, CancellationToken ct)
+    {
+        var dates = await Owned(owner).Select(t => new { t.Date.Year, t.Date.Month }).Distinct().ToArrayAsync(ct);
+        var asOf = await Owned(owner).MaxAsync(t => (DateOnly?)t.Date, ct);
+        var accounts = await Accounts(owner, ct);
+        var currencies = (await Currencies(owner, LedgerFilter.Parse(null, null, null, null, null, null, null), ct))
+            .Concat(accounts.Select(a => a.Currency)).Distinct().Order().ToArray();
+        var currentMonth = DateTime.UtcNow.ToString("yyyy-MM", CultureInfo.InvariantCulture);
+        var months = dates.Select(d => new DateOnly(d.Year, d.Month, 1).ToString("yyyy-MM", CultureInfo.InvariantCulture))
+            .Append(currentMonth).Distinct().OrderDescending().ToArray();
+        return new(asOf?.ToString("yyyy-MM", CultureInfo.InvariantCulture) ?? currentMonth,
+            currencies.Contains("USD") ? "USD" : currencies.FirstOrDefault() ?? "USD", months, currencies,
+            asOf, accounts.Any(a => a.Provider == "development"));
+    }
 
     public async Task ValidateFilters(string owner, LedgerFilter filter, CancellationToken ct)
     {

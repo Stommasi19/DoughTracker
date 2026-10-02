@@ -107,8 +107,10 @@ there are no credentials, access tokens, or Plaid network requests.
 
 ## Dataset and expense rules
 
-The fixed demo window is April–September 2026. September is the initial month;
-the fixed anchor makes visual and arithmetic comparisons reproducible.
+The development seed window is April–September 2026. The frontend reads its
+initial month, available periods, currency, and history date from `/api/v1/workspace`;
+it has no dependency on that fixture window. Reports and comparisons use the
+dates and amounts returned by the backend.
 Chase starts with checking and savings; American Express starts with a credit
 card; connecting Capital One adds another checking account and its six-month
 history. Every month includes purchases, payroll, savings transfers, paired card

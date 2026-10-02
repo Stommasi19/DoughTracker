@@ -8,6 +8,8 @@ public record AccountDto(Guid Id, Guid ConnectionId, string InstitutionId, strin
     decimal? AvailableBalance, string Currency, string ConnectionStatus,
     DateTimeOffset? LastSyncAt, string? LastErrorCode);
 public record ItemsResult<T>(T[] Items);
+public record WorkspaceMetadata(string DefaultMonth, string DefaultCurrency, string[] Months,
+    string[] Currencies, DateOnly? AsOf, bool Seeded);
 public record TransactionPage(LedgerTransaction[] Items, int Page, int PageSize, int TotalCount);
 public record ReportResult(DateOnly DateFrom, DateOnly DateTo, CurrencyReport[] Currencies);
 public record CurrencyReport(string Currency, ExpenseReport Report);
@@ -24,6 +26,7 @@ public record DatedSpending(int Day, DateOnly Date, decimal Current, decimal Pre
 public interface ILedgerStore
 {
     Task<AccountDto[]> Accounts(string owner, CancellationToken ct);
+    Task<WorkspaceMetadata> Workspace(string owner, CancellationToken ct);
     Task<DemoCategory[]> Categories(CancellationToken ct);
     Task ValidateFilters(string owner, LedgerFilter filter, CancellationToken ct);
     Task<TransactionPage> Transactions(string owner, LedgerFilter filter, CancellationToken ct);
@@ -85,6 +88,7 @@ public record LedgerFilter(DateOnly? From, DateOnly? To, Guid? AccountId, string
 
 public sealed class LedgerQueries(ILedgerStore store)
 {
+    public Task<WorkspaceMetadata> Workspace(string owner, CancellationToken ct) => store.Workspace(owner, ct);
     public Task<AccountDto[]> Accounts(string owner, CancellationToken ct) => store.Accounts(owner, ct);
     public Task<DemoCategory[]> Categories(CancellationToken ct) => store.Categories(ct);
     public async Task<TransactionPage> Transactions(string owner, LedgerFilter filter, CancellationToken ct)

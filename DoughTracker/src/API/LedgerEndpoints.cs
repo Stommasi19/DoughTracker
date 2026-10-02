@@ -17,6 +17,10 @@ public static class LedgerEndpoints
                 Results.Problem(statusCode: 503, title: "Storage unavailable", detail: "The ledger is not ready. Try again shortly."))
             .AllowAnonymous().WithTags("Health").Produces(200).ProducesProblem(503);
         var api = app.MapGroup("/api/v1").RequireAuthorization().WithTags("Ledger");
+        api.MapGet("/workspace", async (LedgerQueries ledger, ClaimsPrincipal user, CancellationToken ct) =>
+            Results.Ok(await ledger.Workspace(Owner(user), ct)))
+            .Produces<WorkspaceMetadata>().ProducesProblem(503)
+            .WithDescription("Defaults and available periods/currencies from the owner's active ledger. Default month is the latest transaction month, or current UTC month for empty history. USD is preferred when present; otherwise the first stored currency, with USD for an empty workspace. AsOf is the latest visible transaction date, null for empty history. Periods include the current UTC month.");
         api.MapGet("/accounts", async (LedgerQueries ledger, ClaimsPrincipal user, CancellationToken ct) =>
             Results.Ok(new ItemsResult<AccountDto>(await ledger.Accounts(Owner(user), ct))))
             .Produces<ItemsResult<AccountDto>>().ProducesProblem(503);

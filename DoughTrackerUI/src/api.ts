@@ -50,20 +50,28 @@ export type SpendingGroup = {
   amount: number;
   count: number;
 };
-export type Snapshot = {
-  currency: string;
-  currencies: string[];
-  totalCount: number;
-  seeded: boolean;
-  asOf: string;
-  month: string;
+type WorkspaceMetadata = {
+  defaultMonth: string;
+  defaultCurrency: string;
   months: string[];
+  currencies: string[];
+  asOf: string | null;
+  seeded: boolean;
+};
+export type Snapshot = WorkspaceMetadata & {
+  currency: string;
+  totalCount: number;
+  month: string;
   categories: Category[];
   institutions: Institution[];
   connections: Connection[];
   accounts: Account[];
   transactions: Transaction[];
   report: {
+    dateFrom: string;
+    dateTo: string;
+    previousDateFrom: string;
+    previousDateTo: string;
     spending: number;
     previousSpending: number;
     changePercent: number | null;
@@ -73,7 +81,7 @@ export type Snapshot = {
     expenseCount: number;
     categories: SpendingGroup[];
     merchants: SpendingGroup[];
-    daily: { day: number; current: number; previous: number }[];
+    daily: { day: number; date: string; current: number; previous: number }[];
     trend: { month: string; amount: number }[];
   };
 };
@@ -106,27 +114,25 @@ export async function request<T>(
 export type TransactionPage = { items: Transaction[]; page: number; pageSize: number; totalCount: number };
 type Summary = Pick<Snapshot["report"], "spending" | "previousSpending" | "changePercent" | "pendingSpending" | "refunds" | "dailyAverage" | "expenseCount">;
 type Spending = Pick<Snapshot["report"], "categories" | "merchants" | "daily" | "trend">;
+type ReportDates = Pick<Snapshot["report"], "dateFrom" | "dateTo" | "previousDateFrom" | "previousDateTo">;
 
 export async function loadWorkspace(params: URLSearchParams, options: RequestInit): Promise<Snapshot> {
-  const [{ items: accounts }, { items: categories }] = await Promise.all([
+  const [workspace, { items: accounts }, { items: categories }] = await Promise.all([
+    request<WorkspaceMetadata>("/workspace", options),
     request<{ items: Account[] }>("/accounts", options),
     request<{ items: Category[] }>("/categories", options),
   ]);
-  const seeded = accounts.some(a => a.provider === "development");
-  const month = params.get("month") || (seeded ? "2026-09" : new Date().toISOString().slice(0, 7));
-  const currency = params.get("currency") || "USD";
+  const month = params.get("month") || workspace.defaultMonth;
+  const currency = params.get("currency") || workspace.defaultCurrency;
   const filters = new URLSearchParams(params);
   filters.set("month", month);
   filters.set("currency", currency);
   const reportFilters = new URLSearchParams(filters);
   reportFilters.delete("search");
-  const allCurrencies = new URLSearchParams(reportFilters);
-  allCurrencies.delete("currency");
-  const [transactions, summary, spending, currencySummary] = await Promise.all([
+  const [transactions, summary, spending] = await Promise.all([
     request<TransactionPage>(`/transactions?${filters}&pageSize=20`, options),
-    request<{ currencies: (Summary & { currency: string })[] }>(`/reports/summary?${reportFilters}`, options),
+    request<ReportDates & { currencies: (Summary & { currency: string })[] }>(`/reports/summary?${reportFilters}`, options),
     request<{ currencies: (Spending & { currency: string })[] }>(`/reports/spending?${reportFilters}`, options),
-    request<{ currencies: { currency: string }[] }>(`/reports/summary?${allCurrencies}`, options),
   ]);
   const connections = [...new Map(accounts.map(a => [a.connectionId, {
     id: a.connectionId, institutionId: a.institutionId, status: a.connectionStatus, lastSyncAt: a.lastSyncAt,
@@ -134,18 +140,14 @@ export async function loadWorkspace(params: URLSearchParams, options: RequestIni
   const institutions = [...new Map(accounts.map(a => [a.institutionId, {
     id: a.institutionId, name: a.institutionName, initials: a.institutionName.slice(0, 2).toUpperCase(),
   }])).values()];
-  const report = { ...summary.currencies[0], ...spending.currencies[0] };
-  return { seeded, currency, currencies: currencySummary.currencies.map(c => c.currency),
-    asOf: seeded ? "2026-09-30" : new Date().toISOString().slice(0, 10), month,
-    months: Array.from({ length: 6 }, (_, n) => {
-      const anchor = new Date(`${seeded ? "2026-09" : new Date().toISOString().slice(0, 7)}-01T12:00:00Z`);
-      anchor.setUTCMonth(anchor.getUTCMonth() - n);
-      return anchor.toISOString().slice(0, 7);
-    }), accounts, categories, institutions, connections,
+  const report = { ...summary.currencies[0], ...spending.currencies[0],
+    dateFrom: summary.dateFrom, dateTo: summary.dateTo,
+    previousDateFrom: summary.previousDateFrom, previousDateTo: summary.previousDateTo };
+  return { ...workspace, currency, month, accounts, categories, institutions, connections,
     transactions: transactions.items, totalCount: transactions.totalCount, report };
 }
 
-export const money = (value: number, currency = "USD") =>
+export const money = (value: number, currency: string) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency }).format(value);
 export const monthName = (month: string, short = false) =>
   new Date(`${month}-01T12:00:00`).toLocaleDateString("en-US", {

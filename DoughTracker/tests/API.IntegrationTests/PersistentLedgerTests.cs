@@ -89,12 +89,19 @@ public class PersistentLedgerTests
         Assert.Equal(-12.3456m, await db.Transactions.Where(t => t.OwnerId == "alice" && t.ProviderTransactionId == "precision-eur").Select(t => t.Amount).SingleAsync());
         Assert.Equal(HttpStatusCode.OK, (await alice.GetAsync("/health/ready")).StatusCode);
         using var anonymous = factory.CreateClient();
-        foreach (var endpoint in new[] { "/accounts", "/transactions", "/categories", "/reports/summary", "/reports/spending" })
+        foreach (var endpoint in new[] { "/workspace", "/accounts", "/transactions", "/categories", "/reports/summary", "/reports/spending" })
             Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync("/api/v1" + endpoint)).StatusCode);
 
         var accounts = (await Read(alice, "/api/v1/accounts")).GetProperty("items");
         var bobAccounts = (await Read(bob, "/api/v1/accounts")).GetProperty("items");
         Assert.Equal(3, accounts.GetArrayLength());
+        var workspace = await Read(alice, "/api/v1/workspace");
+        Assert.Equal("2026-09", workspace.GetProperty("defaultMonth").GetString());
+        Assert.Equal("USD", workspace.GetProperty("defaultCurrency").GetString());
+        Assert.Equal("2026-09-30", workspace.GetProperty("asOf").GetString());
+        Assert.True(workspace.GetProperty("seeded").GetBoolean());
+        Assert.Equal(new[] { "EUR", "USD" }, workspace.GetProperty("currencies").EnumerateArray().Select(c => c.GetString()));
+        Assert.Contains(workspace.GetProperty("months").EnumerateArray(), m => m.GetString() == "2026-04");
         Assert.DoesNotContain(accounts.EnumerateArray(), a => bobAccounts.EnumerateArray().Any(b => b.GetProperty("id").GetString() == a.GetProperty("id").GetString()));
         var foreign = bobAccounts[0].GetProperty("id").GetString();
         foreach (var endpoint in new[] { "transactions", "reports/summary", "reports/spending" })
@@ -142,6 +149,11 @@ public class PersistentLedgerTests
         using var unseeded = await Client(factory, "new-user");
         Assert.Empty((await Read(unseeded, "/api/v1/accounts")).GetProperty("items").EnumerateArray());
         Assert.Empty((await Read(unseeded, "/api/v1/reports/summary")).GetProperty("currencies").EnumerateArray());
+        var emptyWorkspace = await Read(unseeded, "/api/v1/workspace");
+        Assert.Equal(DateTime.UtcNow.ToString("yyyy-MM"), emptyWorkspace.GetProperty("defaultMonth").GetString());
+        Assert.Equal(JsonValueKind.Null, emptyWorkspace.GetProperty("asOf").ValueKind);
+        Assert.Empty(emptyWorkspace.GetProperty("currencies").EnumerateArray());
+        Assert.False(emptyWorkspace.GetProperty("seeded").GetBoolean());
 
         var editable = all.EnumerateArray().First(t => t.GetProperty("classification").GetString() == "expense" &&
             t.GetProperty("amount").GetDecimal() < 0 && !t.GetProperty("pending").GetBoolean());
@@ -173,6 +185,27 @@ public class PersistentLedgerTests
             cleared.EnsureSuccessStatusCode();
             Assert.Equal(providerCategory, (await cleared.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("categoryId").GetString());
         }
+
+        // A different owner's dates/currency must drive defaults, independently of the development fixture.
+        var otherConnection = new FinancialConnection { Id = Guid.NewGuid(), OwnerId = "new-user", Provider = "imported", ProviderItemId = "other-item" };
+        var otherAccount = new Account { Id = Guid.NewGuid(), OwnerId = "new-user", ConnectionId = otherConnection.Id,
+            ProviderAccountId = "other-account", Currency = "CAD" };
+        db.Connections.Add(otherConnection);
+        db.Accounts.Add(otherAccount);
+        foreach (var date in new[] { new DateOnly(2023, 11, 4), new DateOnly(2024, 2, 29) })
+            db.Transactions.Add(new Transaction { Id = Guid.NewGuid(), OwnerId = "new-user", AccountId = otherAccount.Id,
+                ProviderTransactionId = date.ToString("yyyy-MM-dd"), Date = date, Currency = "CAD", Amount = -42.50m });
+        db.Transactions.Add(new Transaction { Id = Guid.NewGuid(), OwnerId = "new-user", AccountId = otherAccount.Id,
+            ProviderTransactionId = "removed-future", Date = new DateOnly(2028, 1, 1), Currency = "EUR", RemovedAt = DateTimeOffset.UtcNow });
+        await db.SaveChangesAsync();
+        var otherWorkspace = await Read(unseeded, "/api/v1/workspace");
+        Assert.Equal("2024-02", otherWorkspace.GetProperty("defaultMonth").GetString());
+        Assert.Equal("CAD", otherWorkspace.GetProperty("defaultCurrency").GetString());
+        Assert.Equal("2024-02-29", otherWorkspace.GetProperty("asOf").GetString());
+        Assert.Equal(new[] { "CAD" }, otherWorkspace.GetProperty("currencies").EnumerateArray().Select(c => c.GetString()));
+        Assert.Equal(new[] { DateTime.UtcNow.ToString("yyyy-MM"), "2024-02", "2023-11" },
+            otherWorkspace.GetProperty("months").EnumerateArray().Select(m => m.GetString()));
+        Assert.False(otherWorkspace.GetProperty("seeded").GetBoolean());
 
         // PostgreSQL, not just application filters, rejects cross-owner references.
         db.ChangeTracker.Clear();

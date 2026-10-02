@@ -94,6 +94,7 @@ DTOs or accepted as a write parameter.
 
 | Method and route | Response/behavior |
 |---|---|
+| `GET /api/v1/workspace` | Owner-scoped `defaultMonth`, `defaultCurrency`, available `months`/`currencies`, latest visible transaction date `asOf` (nullable), and `seeded` flag from stored account providers. |
 | `GET /api/v1/accounts` | `{ items: [...] }`; owned active accounts, nullable balances, currency, provider/institution, connection status, last-sync/error metadata. |
 | `GET /api/v1/categories` | `{ items: [{ id, name }] }`; the fixed category lookup. |
 | `GET /api/v1/transactions` | `{ items, page, pageSize, totalCount }`; normalized owned rows, excluding removed transactions and deleted accounts. Pending rows remain visible. |
@@ -114,6 +115,15 @@ are literal. `page` starts at 1; `pageSize` defaults to 20 and is limited to 100
 Ordering is transaction date descending, internal UUID ascending. Offset pages
 can shift if rows change between requests. The UI fetches subsequent pages from
 the server and resets them on filter changes.
+
+The frontend takes defaults and selectors from `/workspace`, rather than assuming
+the development fixture's calendar or currency. The default month is the latest
+visible transaction month, or the current UTC month for empty history. Available
+months include stored transaction months and the current UTC month. Currencies
+come from active accounts and visible transactions; USD is preferred if present,
+otherwise the first currency, with USD as the server's empty-workspace default.
+Report dates, comparison dates, and chart series come directly from report
+responses. Empty history has no fabricated freshness date.
 
 Malformed filters/body or unknown categories return 400. Unknown and foreign
 account/transaction IDs both return 404 without disclosing another owner's data.
@@ -207,6 +217,13 @@ Evidence recorded on 2026-10-02:
   passes. Browser checks cover both fixture owners, server pagination, filtering,
   currency selection, empty/error/retry states, account metadata, and saved/reset
   categories across restart.
+- Frontend alignment follow-up: all eight backend checks pass with PostgreSQL,
+  including owner-scoped workspace defaults, a historical CAD ledger, and removed
+  history exclusion. Build, lint, and auth checks pass. Browser verification with
+  a temporary February 2024 CAD ledger confirms leap-year dates, CA$935.00 totals,
+  pagination from 20 to 22, stored brokerage subtype and attention-required status;
+  removing that test ledger restores the current UTC month and empty-history label.
+  Temporary rows were removed; the development ledger retains its 350 fixture rows.
 
 Live Firebase project sign-in and real Plaid synchronization remain pending.
 No cloud resources or bank connections were created. The legacy Development-only
