@@ -140,7 +140,7 @@ contracts owned by Application, including MassTransit producers and consumers.
 `API` is the executable composition root: endpoint classes depend on
 Application, while `Program.cs` references Infrastructure only to register its
 implementations and start the application. Application tests exercise use cases
-and domain rules; API integration tests boot Api and exercise the real HTTP
+and domain rules; API integration tests boot API and exercise the real HTTP
 pipeline and PostgreSQL integration.
 
 New finance capabilities first grow as feature folders through Domain,
@@ -537,8 +537,9 @@ architecture.
 
 ### AD-1: Modular monolith
 
-**Decision:** Deploy one .NET backend. Connections, Ledger, and Insights remain
-separate folders/namespaces with concrete classes inside the same project.
+**Decision:** Deploy one .NET backend assembled by API from Application,
+Domain, and Infrastructure projects. Connections, Ledger, and Insights remain
+feature folders/namespaces across the relevant projects.
 
 **Why:** The modules preserve domain boundaries and make the architecture easy
 to reason about without multiplying deployments, network calls, authentication,
@@ -607,8 +608,8 @@ dual models, replay rules, or mediator ceremony that v1 does not need.
 
 ## 16. Implementation order
 
-1. Create one ASP.NET Core project with Connections, Ledger, and Insights
-   folders/namespaces, plus the Docker Compose environment.
+1. Create the .NET solution; API, Application, Domain, and Infrastructure
+   projects; both test projects; and the Docker Compose environment.
 2. Add Firebase authentication and UID-based API authorization.
 3. Build Ledger account, transaction, filtering, and recategorization endpoints
    with deterministic mock data.
