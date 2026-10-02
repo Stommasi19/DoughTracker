@@ -24,21 +24,23 @@ Record any unavailable external check as pending instead of marking it complete.
 
 - [x] API, Application, Domain, and Infrastructure projects exist with the
   documented dependency graph.
-- [x] Application and API integration test projects exist; they contain no tests.
+- [x] Application and API integration test projects exist; API integration tests
+  now cover authentication. Application tests remain empty.
 - [x] The API builds/publishes and `GET /health` responds successfully.
 - [x] API Dockerfile and API/PostgreSQL Compose configuration are written;
   `docker compose config --quiet` passes.
-- [ ] Container startup and database persistence are verified. Docker's engine
-  was stopped during the initial check.
+- [x] API/PostgreSQL container startup, health, and development OpenAPI are verified.
+- [ ] Database persistence across restart is verified.
 
-No Firebase authentication, database access, migrations, ledger endpoints,
-reports, or synchronization have been implemented yet.
+Firebase Admin verification and a development-only mock token endpoint are
+implemented. Live Firebase sign-in remains unverified. Database access, migrations,
+ledger endpoints, reports, and synchronization have not been implemented yet.
 
 ## Milestone 1: usable API with development data
 
 ### B01 — Verify the local environment
 
-- [ ] Start API and PostgreSQL with `docker compose up --build -d`.
+- [x] Start API and PostgreSQL with `docker compose up --build -d`.
 - [ ] Verify `/health`, development OpenAPI, logs, and persistent database storage
   across a stop/start without deleting the volume.
 - [ ] Select a supported .NET SDK/runtime and matching package/container versions;
@@ -50,21 +52,25 @@ the database retains a test record across restart. `/health` is liveness only.
 
 ### B02 — Authenticate requests and establish ownership
 
-**Input needed:** Firebase project ID and a choice of real Firebase development
-sign-in or the Firebase Auth emulator for local development.
+**Local choice:** development-only mock authentication, as requested. No Firebase
+setup is required locally. Real Firebase mode needs a project ID, application
+credentials, and a frontend ID token for a live sign-in check.
 
-- [ ] Verify Firebase bearer tokens at the API boundary, including signature,
+- [x] Verify Firebase bearer tokens at the API boundary, including signature,
   issuer, audience, and expiry; derive the owner UID from the verified token.
-- [ ] Require authentication for `/api/v1` application endpoints. Keep liveness
+- [x] Require authentication for `/api/v1` application endpoints. Keep liveness
   public; add independently verified Plaid webhooks in B10.
-- [ ] Establish the verified-owner value passed to application use cases; never
-  accept client-supplied ownership.
-- [ ] If using the Auth emulator, restrict its trust configuration to development.
-- [ ] Add a minimal authenticated identity endpoint/check so sign-in can be tested
+- [x] Establish the verified-owner UID in `ClaimTypes.NameIdentifier` and `uid`
+  claims for future application use cases; never accept client-supplied ownership.
+- [x] Restrict the mock token endpoint and mock token acceptance to Development;
+  reject emulator configuration rather than trusting unsigned emulator tokens.
+- [x] Add a minimal authenticated identity endpoint/check so sign-in can be tested
   before the ledger exists, and document how to obtain a development token.
+- [ ] Verify a real Firebase project's frontend ID token against configured Admin
+  credentials. The SDK validation path already passes local signed-token checks.
 
 **Done when:** valid tokens identify the correct owner; missing, expired, invalid,
-and wrong-project tokens are rejected. Development emulator tokens cannot
+and wrong-project tokens are rejected. Development mock tokens cannot
 authenticate against a non-development configuration.
 
 ### B03 — Persist the first ledger data
@@ -252,7 +258,7 @@ have recorded passing evidence or explicitly unresolved blockers.
 | Decision/input | Needed by | Current direction |
 |---|---|---|
 | First usable milestone includes Plaid? | Milestone planning | Seeded API first recommended; interview answer pending |
-| Firebase project and local sign-in setup | B02 | Firebase already selected; project/setup needed |
+| Firebase project and local sign-in setup | B02 | Local mock implemented; project/credentials needed only for real Firebase verification |
 | Concrete category taxonomy and report date/refund semantics | B03–B06 | Agree and document before endpoint implementation |
 | RabbitMQ versus PostgreSQL job queue conflict | B08 | RabbitMQ/MassTransit matches most of the approved architecture |
 | Plaid credentials and local secret storage | B09 | Sandbox; no paid plan; secret store chosen before token storage |
