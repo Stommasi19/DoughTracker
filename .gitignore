@@ -19,6 +19,7 @@
 **/.env
 **/.env.*
 !**/.env.example
+!**/.env.mock
 **/appsettings.*.local.json
 *.p12
 *.pfx

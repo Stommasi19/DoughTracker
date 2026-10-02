@@ -4,14 +4,20 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --mode mock",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:auth": "node scripts/check-auth.mjs",
+    "dev:firebase": "vite"
   },
   "dependencies": {
+    "firebase": "^12.19.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
+  },
+  "overrides": {
+    "@grpc/grpc-js": "^1.14.5"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
