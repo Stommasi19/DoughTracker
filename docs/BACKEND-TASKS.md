@@ -1,6 +1,8 @@
 # Backend implementation tasks
 
-Working branch: `feat/backend-foundation`
+Milestone 1 working branch: `feat/milestone-1`
+
+Implementation and verification: [LEDGER_API.md](LEDGER_API.md).
 
 Architecture: [ARCHITECTURE.md](ARCHITECTURE.md). This checklist tracks delivery;
 the architecture document defines the system boundaries.
@@ -12,8 +14,8 @@ and transactions, change categories, and display accurate spending reports. Then
 connect Plaid Sandbox and synchronize its changes reliably into that same ledger.
 
 Recommended first usable milestone: tasks B01–B06, using deterministic development
-data. Whether Plaid is required for that first milestone is an open interview
-question; all tasks below remain part of the full v1 backend.
+data. The accepted milestone 1 plan delivers the seeded API first; Plaid remains
+in milestone 2. All tasks below remain part of the full v1 backend.
 
 Work through tasks in order. For each task, implement the smallest complete slice,
 run its completion checks, and record the result here before moving on. Keep tests
@@ -25,27 +27,32 @@ Record any unavailable external check as pending instead of marking it complete.
 - [x] API, Application, Domain, and Infrastructure projects exist with the
   documented dependency graph.
 - [x] Application and API integration test projects exist; API integration tests
-  now cover authentication. Application tests remain empty.
+  cover authentication, persistence, ownership, report rules, and failure handling.
 - [x] The API builds/publishes and `GET /health` responds successfully.
 - [x] API Dockerfile and API/PostgreSQL Compose configuration are written;
   `docker compose config --quiet` passes.
 - [x] API/PostgreSQL container startup, health, and development OpenAPI are verified.
-- [ ] Database persistence across restart is verified.
+- [x] Database persistence across restart is verified (350 rows and one manual override).
 
 Firebase Admin verification and a development-only mock token endpoint are
-implemented. Live Firebase sign-in remains unverified. Database access, migrations,
-ledger endpoints, reports, and synchronization have not been implemented yet.
+implemented. Milestone 1 now includes PostgreSQL/EF migrations, owner-scoped
+ledger endpoints, reports, readiness, and the persistent dashboard. Live Firebase
+sign-in remains unverified; synchronization is milestone 2.
 
 ## Milestone 1: usable API with development data
 
 ### B01 — Verify the local environment
 
 - [x] Start API and PostgreSQL with `docker compose up --build -d`.
-- [ ] Verify `/health`, development OpenAPI, logs, and persistent database storage
+- [x] Verify `/health`, development OpenAPI, logs, and persistent database storage
   across a stop/start without deleting the volume.
-- [ ] Select a supported .NET SDK/runtime and matching package/container versions;
+- [x] Select a supported .NET SDK/runtime and matching package/container versions;
   check the existing .NET 9 baseline before adding dependencies.
-- [ ] Document configuration and commands needed to reproduce the checks.
+- [x] Document configuration and commands needed to reproduce the checks.
+
+**Evidence:** SDK 10.0.401/runtime 10.0.12, EF Core 10.0.12, Npgsql provider 10.0.3;
+Compose image/config, OpenAPI, health and full stop/start verified. Run commands
+and dedicated PostgreSQL test setup are in the ledger handoff.
 
 **Done when:** a fresh checkout can run the backend from the documented commands;
 the database retains a test record across restart. `/health` is liveness only.
@@ -75,19 +82,19 @@ authenticate against a non-development configuration.
 
 ### B03 — Persist the first ledger data
 
-- [ ] Add PostgreSQL access and migrations in Infrastructure, using EF Core with
+- [x] Add PostgreSQL access and migrations in Infrastructure, using EF Core with
   the PostgreSQL provider so the planned MassTransit outbox can share the database.
-- [ ] Create the minimum connection metadata, account, transaction, and category
+- [x] Create the minimum connection metadata, account, transaction, and category
   schema needed by the ledger, following the architecture's ownership rules.
-- [ ] Use decimal money (`numeric(19,4)`), explicit currencies, and date-only
+- [x] Use decimal money (`numeric(19,4)`), explicit currencies, and date-only
   transaction dates. Add foreign keys and unique provider identifiers scoped to
   their connection/account as appropriate.
-- [ ] Seed the v1 category lookup and opt-in deterministic development data for
+- [x] Seed the v1 category lookup and opt-in deterministic development data for
   two owners. Make rerunning the seed safe and prohibit development seeding in
   non-development environments.
-- [ ] Include income, expenses, refunds, transfers, card payments, pending and
+- [x] Include income, expenses, refunds, transfers, card payments, pending and
   removed transactions, and checking/savings/credit-card accounts in the sample.
-- [ ] Add readiness that checks database access and required schema separately
+- [x] Add readiness that checks database access and required schema separately
   from liveness; return a sanitized failure response when storage is unavailable.
 
 **Done when:** migrations work on an empty database, repeat seeding creates no
@@ -96,16 +103,16 @@ serve requests while liveness still reports the running process.
 
 ### B04 — Browse accounts and transactions
 
-- [ ] Implement `GET /api/v1/accounts` and `GET /api/v1/transactions` over stored
+- [x] Implement `GET /api/v1/accounts` and `GET /api/v1/transactions` over stored
   data, scoped to the authenticated owner and excluding deleted accounts and
   removed transactions.
-- [ ] Add transaction search, account/category/date filters, bounded pagination,
+- [x] Add transaction search, account/category/date filters, bounded pagination,
   and deterministic ordering with a tie-breaker. Validate ranges and parameters.
-- [ ] Return account balance/currency and connection freshness/status metadata;
+- [x] Return account balance/currency and connection freshness/status metadata;
   identify pending transactions clearly.
-- [ ] Publish DTOs, filter/date semantics, pagination, and example responses in
+- [x] Publish DTOs, filter/date semantics, pagination, and example responses in
   OpenAPI and a short frontend handoff; configure the agreed local frontend origin.
-- [ ] Use consistent sanitized validation and failure responses; treat identifiers
+- [x] Use consistent sanitized validation and failure responses; treat identifiers
   belonging to another owner as unavailable without revealing their data.
 
 **Done when:** the frontend can request these endpoints using a Firebase token;
@@ -114,10 +121,10 @@ including through account/category filters.
 
 ### B05 — Save category overrides
 
-- [ ] Implement `PATCH /api/v1/transactions/{id}/category` with ownership checks
+- [x] Implement `PATCH /api/v1/transactions/{id}/category` with ownership checks
   and validation against the seeded category lookup.
-- [ ] Define and document clearing an override to restore the provider category.
-- [ ] Keep provider category and manual override separate; every read uses the
+- [x] Define and document clearing an override to restore the provider category.
+- [x] Keep provider category and manual override separate; every read uses the
   effective category, with the manual override taking precedence.
 
 **Done when:** an override survives restart, changes filtering/report category,
@@ -126,21 +133,30 @@ preservation is additionally verified during B07.
 
 ### B06 — Produce accurate spending reports
 
-- [ ] Implement `GET /api/v1/reports/spending` and
+- [x] Implement `GET /api/v1/reports/spending` and
   `GET /api/v1/reports/summary` over the stored ledger.
-- [ ] Apply consistent owner, account, date, and effective-category filters.
+- [x] Apply consistent owner, account, date, and effective-category filters.
   Define report date boundaries and chart grouping in the API contract.
-- [ ] Exclude transfers, card payments, removed transactions, deleted accounts,
+- [x] Exclude transfers, card payments, removed transactions, deleted accounts,
   and pending transactions by default. Include card purchases; define refund
   treatment explicitly so refunds reduce the relevant spending totals.
-- [ ] Keep different currencies separate, use decimal arithmetic, and return
+- [x] Keep different currencies separate, use decimal arithmetic, and return
   useful empty results for periods with no data.
-- [ ] Add a small regression check comparing report totals with the seeded ledger
+- [x] Add a small regression check comparing report totals with the seeded ledger
   and verify owner isolation through the HTTP pipeline.
 
 **Done when:** the frontend can render account/transaction lists and spending
 charts from authenticated API responses, and the sample ledger and reports agree.
 This completes the recommended first usable milestone.
+
+### Recorded milestone 1 verification
+
+2026-10-02: 8 backend checks passed against PostgreSQL 18, none skipped when the
+dedicated test connection was configured. Frontend build/lint/auth lifecycle checks
+passed. Browser checks exercised sign-in, lists, pagination, filtering, currencies,
+category save/reset across restart, and both owners. Live Firebase project sign-in
+remains pending credentials and a frontend token; Plaid is outside this milestone.
+Detailed evidence and reproducible commands: [LEDGER_API.md](LEDGER_API.md#verification).
 
 ## Milestone 2: durable bank synchronization
 
@@ -257,9 +273,9 @@ have recorded passing evidence or explicitly unresolved blockers.
 
 | Decision/input | Needed by | Current direction |
 |---|---|---|
-| First usable milestone includes Plaid? | Milestone planning | Seeded API first recommended; interview answer pending |
+| First usable milestone includes Plaid? | Milestone planning | Seeded API first approved and implemented; Plaid is milestone 2 |
 | Firebase project and local sign-in setup | B02 | Local mock implemented; project/credentials needed only for real Firebase verification |
-| Concrete category taxonomy and report date/refund semantics | B03–B06 | Agree and document before endpoint implementation |
+| Concrete category taxonomy and report date/refund semantics | B03–B06 | Existing fixed category lookup and report semantics implemented; see ledger handoff |
 | RabbitMQ versus PostgreSQL job queue conflict | B08 | RabbitMQ/MassTransit matches most of the approved architecture |
 | Plaid credentials and local secret storage | B09 | Sandbox; no paid plan; secret store chosen before token storage |
 | HTTPS tunnel | B10 | Choose only when remote webhooks are exercised |

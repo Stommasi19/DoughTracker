@@ -7,14 +7,17 @@ An evolving expense tracking application that will be expanded into a budgeting 
 - [Frontend preview, screen map, and mock API](docs/FRONTEND_FOUNDATION.md)
 - [Firebase sign-in, local mock, and production setup](docs/FIREBASE_AUTH.md)
 - [Sequential backend tasks](docs/BACKEND-TASKS.md)
+- [Milestone 1 implementation plan](docs/MILESTONE-1-PLAN.md)
+- [Persistent ledger API and verification](docs/LEDGER_API.md)
 
 ## Start the backend locally
 
 Start Docker Desktop, then run from the repository root:
 
 ```sh
-docker compose up --build -d
+MIGRATE_DATABASE=true SEED_DEVELOPMENT=true docker compose up --build -d
 curl --fail http://localhost:5084/health
+curl --fail http://localhost:5084/health/ready
 ```
 
 The Docker API runs at `http://localhost:5084`. Its development OpenAPI document is at
@@ -33,9 +36,21 @@ The default database password is for this local setup. Set `POSTGRES_PASSWORD`
 in a root `.env` file before the first start if you want a different password.
 Changing it later also requires updating the existing database user's password.
 
-This first step runs the API and database; database access and migrations are
-not implemented yet. The frontend continues to run separately while it is being
-built. RabbitMQ/MassTransit will be added with the synchronization worker.
+Milestone 1 persists an owner-scoped ledger in PostgreSQL using EF Core. The
+command above explicitly opts into Development migrations and fixtures for UIDs
+`alice` and `bob`; both flags default to false. It inserts missing fixture rows
+without resetting saved categories or account tombstones. Startup migrations and
+fixtures are rejected outside Development. `/health/ready` checks storage and
+required migrations separately from process liveness.
+
+For the dashboard, start the Firebase emulator, run `npm --prefix DoughTrackerUI
+run seed:users`, and sign in as `alice@example.test` or `bob@example.test` with
+local password `local-test-words-42`. Run the frontend with
+`API_PROXY_TARGET=http://127.0.0.1:5084 npm --prefix DoughTrackerUI run dev`.
+A new, unseeded identity sees an empty ledger. See the [API guide](docs/LEDGER_API.md)
+for the complete setup, custom seed UIDs, migrations, and PostgreSQL checks.
+The frontend remains a separate process; RabbitMQ/MassTransit arrive with the
+synchronization worker in milestone 2.
 
 Follow the [backend task checklist](docs/BACKEND-TASKS.md) for implementation order,
 completion checks, and decisions needed along the way.
@@ -91,12 +106,15 @@ expiry; the owner UID comes from the verified token. See
 [Firebase ID token verification](https://firebase.google.com/docs/auth/admin/verify-id-tokens).
 Missing project configuration or credentials prevents real-mode startup.
 
+Host commands require the pinned .NET SDK 10.0.401 (runtime 10.0.12).
 Run the authentication regression checks with:
 
 ```sh
 dotnet test DoughTracker/tests/API.IntegrationTests/API.IntegrationTests.csproj
 ```
 
+Without `DOUGHTRACKER_TEST_DATABASE`, the dedicated PostgreSQL check is explicitly
+skipped; the [API guide](docs/LEDGER_API.md#verification) runs the full suite.
 These checks exercise the HTTP pipeline, mock token expiry/tampering, production
 mock protection, and actual Admin SDK verification with locally generated signing
 keys and a simulated certificate response. A live-project sign-in check remains

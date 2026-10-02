@@ -1,13 +1,14 @@
 # Frontend foundation
 
-Built in `feat/frontend-foundation`, in the sibling worktree
-`DoughTracker-frontend-foundation`. This pass establishes a usable desktop
-preview before real bank ingestion. The sign-in foundation now uses Firebase
+The frontend foundation established the desktop preview; milestone 1 connects
+that interface to a persistent, owner-scoped ledger before real bank ingestion.
+See [ledger API/run instructions](LEDGER_API.md). The sign-in foundation now uses Firebase
 Authentication; see [local mock and cloud setup](FIREBASE_AUTH.md).
 
 ## Run the preview
 
-Requires .NET 9, Node/npm, and the Firebase CLI. From this worktree, run these
+Requires Docker Desktop, Node/npm, and the Firebase CLI. Host .NET commands
+require SDK 10.0.401. From this worktree, run these
 in separate terminals:
 
 ```sh
@@ -15,19 +16,21 @@ firebase emulators:start --only auth --project demo-doughtracker
 ```
 
 ```sh
-dotnet run --project DoughTracker/src/API --launch-profile http
+MIGRATE_DATABASE=true SEED_DEVELOPMENT=true docker compose up --build -d
 ```
 
 ```sh
 cd DoughTrackerUI
 npm ci
-npm run dev
+npm run seed:users
+API_PROXY_TARGET=http://127.0.0.1:5084 npm run dev
 ```
 
-Open <http://127.0.0.1:5173>. Vite proxies `/api` to the API on port 5083.
+Open <http://127.0.0.1:5173>. Vite proxies `/api` to the Docker API on port 5084 in the command above (host
+default 5083). Sign in as Alice or Bob using the [local fixture credentials](LEDGER_API.md).
 All three services run locally. The demo routes exist only in Development.
 `npm run build` builds the frontend; this pass does not configure production
-hosting. The shared demo ledger lives in memory and resets when the API restarts.
+hosting. The dashboard reads PostgreSQL; records and manual categories survive restart.
 The theme preference is stored in this browser.
 
 ## Screen map
@@ -38,8 +41,8 @@ The theme preference is stored in this browser.
 | Report controls   | Month and account selectors; category selection opens the ledger                                                               |
 | Report summary    | Net posted spending, previous-month comparison, daily average, purchase count, pending spending                                |
 | Report analysis   | Cumulative spending comparison, category bars, latest activity, top merchants, six-month history                               |
-| Transactions      | Month/account/category filters, merchant/description search, more rows, transaction details, manual category override or reset |
-| Accounts          | Institution status, last successful sync, last-known account balances, connect/disconnect/reconnect, replayable demo sync      |
+| Transactions      | Month/account/category filters, merchant/description search, server pagination, transaction details, manual category override or reset |
+| Accounts          | Institution status, last successful sync, last-known account balances, stored connection status; bank actions deferred to milestone 2      |
 
 Navigation uses browser hashes and supports back/forward without a routing
 dependency. Desktop is the design target (1024px and wider); smaller/zoomed
@@ -49,7 +52,8 @@ focus, a skip link, reduced motion, and a chart-data table support accessibility
 The sign-in page appears before the workspace. Start the local mock authentication
 service using the Firebase setup guide; the login workflow is the same as production.
 There is no development-only sign-in bypass.
-Authentication does not isolate the shared demo ledger by user.
+Persistent ledger requests are isolated by the verified owner UID. Legacy demo
+fixture routes remain shared and Development-only; the dashboard does not use them.
 API requests nevertheless require a valid bearer token; the local request helper
 obtains a protected backend token for the signed-in mock UID.
 
@@ -120,7 +124,7 @@ comparison line ends at the previous full month's total, including its final day
 when the two months have different lengths. Category totals can be negative if
 refunds exceed purchases in that category.
 
-## Mock API
+## Legacy mock API (fixture inspection only)
 
 | Method and route                             | Behavior                                                                                                                 |
 | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
@@ -151,9 +155,11 @@ agreement, refund and pending arithmetic, sync replay, manual override retention
 disconnect/reconnect, and differing month lengths. Browser checks exercise the
 actual UI and HTTP flows in both themes.
 
-Next, replace the shared in-memory demo ledger with persistent, owner-scoped
-Ledger and Insights use cases with verified-UID ownership checks; then integrate Plaid
-Sandbox Link, cursor pagination, webhook ingestion, and connection errors using
-the existing architecture handoff. The fixture normalizer is for this USD demo,
-not a complete production ingestion/transfer-matching algorithm. These demo
-routes must not be enabled for real-user financial data.
+Milestone 1 now uses `/api/v1` accounts, categories, paginated transactions,
+category overrides, spending charts, and summaries backed by PostgreSQL.
+The report calculator is shared with the preview fixture regression check.
+The UI separates currencies and no longer exposes fixture connection mutations.
+Milestone 2 integrates Plaid Sandbox Link, cursor pagination, webhook ingestion,
+and recoverable connection failures. The fixture normalizer remains a USD demo,
+not a complete production ingestion/transfer-matching algorithm. Demo routes must
+not receive real-user financial data.

@@ -42,7 +42,7 @@ public static class DependencyInjection
                 options.UseMockAuthentication = useMockAuthentication);
         services.AddAuthorization(options => options.FallbackPolicy = new AuthorizationPolicyBuilder()
             .RequireAuthenticatedUser().Build());
-        return services;
+        return services.AddLedger(configuration, environment);
     }
 
     public static IServiceCollection AddMockInfrastructure(this IServiceCollection services)

@@ -48,8 +48,8 @@ export function Icon({
 export function SpendingChart({ data }: { data: Snapshot }) {
   const { daily, spending, previousSpending } = data.report;
   const values = daily.flatMap((day) => [day.current, day.previous]);
-  const max = Math.max(1000, Math.ceil(Math.max(0, ...values) / 1000) * 1000);
-  const min = Math.min(0, Math.floor(Math.min(0, ...values) / 1000) * 1000);
+  const max = Math.max(1, ...values);
+  const min = Math.min(0, ...values);
   const x = (index: number) =>
     56 + (index / Math.max(1, daily.length - 1)) * 590;
   const y = (value: number) => 206 - ((value - min) / (max - min)) * 180;
@@ -76,7 +76,7 @@ export function SpendingChart({ data }: { data: Snapshot }) {
         className="spending-chart"
         viewBox="0 0 670 245"
         role="img"
-        aria-label={`Cumulative posted spending: ${money(spending)} this month, ${money(previousSpending)} previous month.`}
+        aria-label={`Cumulative posted spending: ${money(spending, data.currency)} this month, ${money(previousSpending, data.currency)} previous month.`}
       >
         {[0, 1, 2, 3, 4].map((step) => {
           const value = min + ((max - min) * step) / 4;
@@ -90,7 +90,7 @@ export function SpendingChart({ data }: { data: Snapshot }) {
                 className="chart-grid"
               />
               <text x="42" y={y(value) + 4} textAnchor="end">
-                {value < 0 ? "−" : ""}${Math.abs(value) / 1000}k
+                {new Intl.NumberFormat("en-US", { style: "currency", currency: data.currency, notation: "compact" }).format(value)}
               </text>
             </g>
           );
@@ -130,8 +130,8 @@ export function SpendingChart({ data }: { data: Snapshot }) {
             {daily.map((day) => (
               <tr key={day.day}>
                 <td>{day.day}</td>
-                <td>{money(day.current)}</td>
-                <td>{money(day.previous)}</td>
+                <td>{money(day.current, data.currency)}</td>
+                <td>{money(day.previous, data.currency)}</td>
               </tr>
             ))}
           </tbody>
@@ -160,7 +160,7 @@ export function CategoryBreakdown({
             className="category-row"
             key={category.id}
             onClick={() => onCategory(category.id)}
-            aria-label={`View ${category.name} transactions, ${money(category.amount)}`}
+            aria-label={`View ${category.name} transactions, ${money(category.amount, data.currency)}`}
           >
             <div className="category-label">
               <span>
@@ -174,7 +174,7 @@ export function CategoryBreakdown({
                 />
                 {category.name}
               </span>
-              <strong>{money(category.amount)}</strong>
+              <strong>{money(category.amount, data.currency)}</strong>
             </div>
             <div className="category-track" aria-hidden="true">
               <div

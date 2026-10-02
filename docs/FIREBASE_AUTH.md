@@ -34,12 +34,20 @@ npm ci
 npm run dev
 ```
 
-Keep the existing .NET development API running on port 5083 for the expense
-report. Open <http://127.0.0.1:5173>. The emulator runs on loopback port 9099;
+Keep the .NET Development API running on port 5083, with a configured PostgreSQL
+connection and migrations applied. For Docker on port 5084, start Vite with
+`API_PROXY_TARGET=http://127.0.0.1:5084`. See [ledger setup](LEDGER_API.md). Open <http://127.0.0.1:5173>. The emulator runs on loopback port 9099;
 its management UI is at <http://127.0.0.1:4000/auth>.
 
-Use **Create an account** with a test email and a password of at least 12
-characters. Google sign-in opens the emulator's simulated identity picker, not
+For the seeded ledger, run `npm --prefix DoughTrackerUI run seed:users` from the
+repository root. It creates emulator-only UIDs `alice` and `bob` matching the
+default database seed owners. Sign in as `alice@example.test` or
+`bob@example.test` with password `local-test-words-42`. Rerunning the helper
+does not reset existing passwords. Other identities see an empty ledger unless
+their actual UID is explicitly configured as a seed owner.
+
+You can also use **Create an account** with a test email and a password of at least
+12 characters. Google sign-in opens the emulator's simulated identity picker, not
 Google's live OAuth consent screen. Password-reset links appear in emulator logs
 and the management UI; no real email is sent. Accounts reset when the emulator
 restarts. Use only test credentials with the mock service.
@@ -61,7 +69,10 @@ npm run test:auth
 
 It creates and deletes its own isolated test account, checks rejected credentials,
 sign-out/sign-in, reset-email delivery to the emulator, ID-token issuance,
-backend token handoff, verified UID, and protected workspace access.
+backend token handoff, verified UID, and protected `/api/v1/accounts` access.
+Set `AUTH_EMULATOR_URL` and `API_BASE_URL` when checking other local ports.
+The frontend accepts `VITE_FIREBASE_AUTH_EMULATOR_URL` for an alternate loopback
+emulator; its default remains port 9099.
 The check never reads cloud configuration or uses a live Firebase project.
 
 ## Connect a real Firebase project
@@ -106,21 +117,19 @@ configuration, token protection, Firebase Admin construction, and lifetimes;
 
 ## Security boundary and next production step
 
-The backend verifies real Firebase ID tokens and has regression checks for
-signature, issuer, project, expiry, and mock-token rejection. This is still
-**not a production-ready financial backend**: `/api/demo` routes are
-development-only, authenticated, shared in-memory fixtures. Signing in does not
-isolate them by owner. The UI labels them as demo data. In Production neither
-these routes nor the mock workspace registration exists.
+The backend verifies real Firebase ID tokens and scopes persistent `/api/v1`
+reads and category edits to the verified UID. PostgreSQL constraints enforce
+owner relationships between connections, accounts, and transactions. The dashboard
+uses these persistent endpoints and does not call `/api/demo`.
 
-Before replacing fixtures with real financial data:
+Legacy `/api/demo` routes remain Development-only, authenticated, shared in-memory
+fixtures for provider inspection and preview regression checks. They contain no
+persistent user records and are absent in Production. Do not import real financial
+data into them.
 
-1. Scope every persistent read/write to the verified UID and check account and
-   connection ownership. Test cross-user access rejection.
-2. Verify email ownership where appropriate and define account deletion/session
-   revocation behavior before inviting other users.
-3. Wire the authenticated dashboard to these owner-scoped endpoints, then verify
-   Google OAuth and actual email delivery on the chosen production domain.
+Live Firebase project sign-in, Google OAuth, and actual reset-email delivery are
+pending until a project, credentials, and production domain are available. Session
+revocation/account lifecycle and bank ingestion remain later release work.
 
 No Firestore database, hosting deployment, analytics, billing, or cloud resources
 have been provisioned. Ledger persistence remains PostgreSQL per the architecture

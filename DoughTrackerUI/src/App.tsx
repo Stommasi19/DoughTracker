@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import {
   dateName,
+  loadWorkspace,
   money,
   monthName,
   request,
   transactionCategory,
 } from "./api";
-import type { Snapshot, Transaction } from "./api";
+import type { Snapshot, Transaction, TransactionPage } from "./api";
 import {
   CategoryBreakdown,
   Icon,
@@ -42,22 +43,22 @@ function App({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [connecting, setConnecting] = useState(false);
-  const [selectedInstitution, setSelectedInstitution] = useState("capital-one");
+  const [currency, setCurrency] = useState("USD");
   const [selectedTransaction, setSelectedTransaction] =
     useState<Transaction | null>(null);
   const [editingCategory, setEditingCategory] = useState("");
-  const [visibleRows, setVisibleRows] = useState(20);
+  const currentRequest = useRef("");
   const dialog = useRef<HTMLDialogElement>(null);
   const hasFilters = Boolean(
-    accountId || categoryId || (page === "transactions" && search),
+    accountId || categoryId || currency !== "USD" || (page === "transactions" && search),
   );
   const params = new URLSearchParams();
   if (month) params.set("month", month);
   if (accountId) params.set("accountId", accountId);
   if (categoryId) params.set("categoryId", categoryId);
   if (page === "transactions" && search) params.set("search", search);
-  const requestPath = `/workspace?${params}`;
+  params.set("currency", currency);
+  const requestPath = params.toString();
   const requestKey = `${requestPath}|${page}|${refresh}`;
   const loading = completedRequest !== requestKey;
 
@@ -75,11 +76,11 @@ function App({
   }, []);
   useEffect(() => {
     const controller = new AbortController();
-    request<Snapshot>(requestPath, { signal: controller.signal })
+    currentRequest.current = requestKey;
+    loadWorkspace(new URLSearchParams(requestPath), { signal: controller.signal })
       .then((snapshot) => {
         if (!controller.signal.aborted) {
           setData(snapshot);
-          setVisibleRows(20);
           setError("");
         }
       })
@@ -140,14 +141,27 @@ function App({
     setAccountId("");
     setCategoryId("");
     setSearch("");
+    setCurrency("USD");
   }
   function viewCategory(id: string) {
     setCategoryId(id);
     location.hash = "transactions";
   }
-  function beginConnection() {
-    setConnecting(true);
-    location.hash = "accounts";
+  async function loadMore() {
+    if (!data) return;
+    const key = currentRequest.current;
+    const filters = new URLSearchParams(requestPath);
+    filters.set("month", data.month);
+    filters.set("page", String(Math.floor(data.transactions.length / 20) + 1));
+    setBusy(true);
+    setError("");
+    try {
+      const result = await request<TransactionPage>(`/transactions?${filters}`);
+      if (currentRequest.current === key)
+        setData(previous => previous ? { ...previous, transactions: [...previous.transactions, ...result.items], totalCount: result.totalCount } : previous);
+    } catch (reason) {
+      if (currentRequest.current === key) setError(reason instanceof Error ? reason.message : "Could not load more transactions.");
+    } finally { setBusy(false); }
   }
 
   const connectedCount =
@@ -265,7 +279,7 @@ function App({
             <span className="profile-avatar">{userLabel[0].toUpperCase()}</span>
             <div>
               <strong title={userLabel}>{userLabel}</strong>
-              <span>Shared demo data</span>
+              <span>Personal ledger</span>
             </div>
           </div>
         </div>
@@ -282,7 +296,7 @@ function App({
           </span>
           <span className="demo-badge">
             <span className="status-dot" />
-            Demo workspace
+            Personal workspace
           </span>
         </div>
         <header className="page-heading">
@@ -291,14 +305,6 @@ function App({
             <h1>{title}</h1>
             <p className="subtitle">{subtitle}</p>
           </div>
-          <button
-            className="button primary"
-            onClick={beginConnection}
-            disabled={busy}
-          >
-            <Icon name="plus" size={17} />
-            Connect account
-          </button>
         </header>
         <div className="feedback-space" aria-live="polite">
           {error && (
@@ -339,7 +345,7 @@ function App({
             <p>
               {loading
                 ? "Gathering accounts and expense history…"
-                : "Start the demo API, then use Retry above."}
+                : "Start the API, then use Retry above."}
             </p>
           </div>
         ) : (
@@ -405,6 +411,14 @@ function App({
                     Clear filters
                   </button>
                 )}
+                {(data.currencies.length > 1 || currency !== "USD") && (
+                  <label className="filter-label">
+                    <span>Currency</span>
+                    <select aria-label="Currency" value={currency} onChange={event => setCurrency(event.target.value)}>
+                      {[...new Set([currency, "USD", ...data.currencies])].map(code => <option key={code} value={code}>{code}</option>)}
+                    </select>
+                  </label>
+                )}
                 <span className="filter-end" role="status">
                   {loading
                     ? "Updating…"
@@ -425,7 +439,7 @@ function App({
                     <div className="primary-stat">
                       <span className="stat-label">Total spent this month</span>
                       <strong className="stat-value">
-                        {money(report.spending)}
+                        {money(report.spending, data.currency)}
                       </strong>
                       <span
                         className={`comparison ${report.changePercent !== null && report.changePercent <= 0 ? "decreased" : ""}`}
@@ -443,7 +457,7 @@ function App({
                             </span>{" "}
                             vs. {priorMonthName}{" "}
                             <span className="previous-total">
-                              ({money(report.previousSpending)})
+                              ({money(report.previousSpending, data.currency)})
                             </span>
                           </>
                         )}
@@ -452,7 +466,7 @@ function App({
                     <div>
                       <span className="stat-label">Daily average</span>
                       <strong className="stat-value secondary">
-                        {money(report.dailyAverage)}
+                        {money(report.dailyAverage, data.currency)}
                       </strong>
                       <span className="stat-footnote">
                         Across {report.daily.length} calendar days
@@ -465,7 +479,7 @@ function App({
                         <span className="metric-unit">transactions</span>
                       </strong>
                       <span className="stat-footnote">
-                        {money(report.refunds)} in refunds deducted
+                        {money(report.refunds, data.currency)} in refunds deducted
                       </span>
                     </div>
                     <div>
@@ -473,7 +487,7 @@ function App({
                         Pending spending <span className="pending-dot" />
                       </span>
                       <strong className="stat-value secondary">
-                        {money(report.pendingSpending)}
+                        {money(report.pendingSpending, data.currency)}
                       </strong>
                       <span className="stat-footnote">
                         Not included in your total
@@ -540,7 +554,7 @@ function App({
                                 : "transactions"}
                             </span>
                           </div>
-                          <strong>{money(merchant.amount)}</strong>
+                          <strong>{money(merchant.amount, data.currency)}</strong>
                         </div>
                       ))}
                       {!report.merchants.length && (
@@ -566,11 +580,11 @@ function App({
                               : "month-item"
                           }
                           onClick={() => setMonth(item.month)}
-                          aria-label={`View ${monthName(item.month)}, ${money(item.amount)} spent`}
+                          aria-label={`View ${monthName(item.month)}, ${money(item.amount, data.currency)} spent`}
                           aria-pressed={item.month === data.month}
                         >
                           <span>{monthName(item.month, true)}</span>
-                          <strong>{money(item.amount)}</strong>
+                          <strong>{money(item.amount, data.currency)}</strong>
                         </button>
                       ))}
                     </div>
@@ -587,11 +601,11 @@ function App({
                     <div>
                       <h2>Transaction ledger</h2>
                       <p>
-                        {data.transactions.length}{" "}
-                        {data.transactions.length === 1
+                        {data.totalCount}{" "}
+                        {data.totalCount === 1
                           ? "transaction"
                           : "transactions"}{" "}
-                        · {money(report?.spending ?? 0)} in posted expenses
+                        · {money(report?.spending ?? 0, data.currency)} in posted expenses
                       </p>
                     </div>
                     <label className="search-input">
@@ -608,18 +622,19 @@ function App({
                   </div>
                   <TransactionTable
                     data={data}
-                    transactions={data.transactions.slice(0, visibleRows)}
+                    transactions={data.transactions}
                     onOpen={openTransaction}
                   />
                   <div className="ledger-footer">
                     <span>
-                      Showing {Math.min(visibleRows, data.transactions.length)}{" "}
-                      of {data.transactions.length}
+                      Showing {data.transactions.length}{" "}
+                      of {data.totalCount}
                     </span>
-                    {visibleRows < data.transactions.length && (
+                    {data.transactions.length < data.totalCount && (
                       <button
                         className="button"
-                        onClick={() => setVisibleRows((value) => value + 20)}
+                        disabled={busy || loading}
+                        onClick={() => void loadMore()}
                       >
                         Show more
                       </button>
@@ -630,73 +645,6 @@ function App({
               )}
               {page === "accounts" && (
                 <>
-                  {connecting && (
-                    <section className="panel connect-panel">
-                      <div className="section-heading">
-                        <div>
-                          <h2>Connect an institution</h2>
-                          <p>
-                            Try a simulated connection. No bank credentials are
-                            needed.
-                          </p>
-                        </div>
-                        <button
-                          className="icon-button"
-                          aria-label="Close connection setup"
-                          onClick={() => setConnecting(false)}
-                        >
-                          <Icon name="close" />
-                        </button>
-                      </div>
-                      <form
-                        onSubmit={async (event) => {
-                          event.preventDefault();
-                          if (
-                            await mutate(
-                              "/connections",
-                              { institutionId: selectedInstitution },
-                              "Institution connected. Its accounts and history are ready.",
-                            )
-                          )
-                            setConnecting(false);
-                        }}
-                      >
-                        <label>
-                          Institution
-                          <select
-                            value={selectedInstitution}
-                            onChange={(event) =>
-                              setSelectedInstitution(event.target.value)
-                            }
-                          >
-                            {data.institutions.map((institution) => (
-                              <option
-                                key={institution.id}
-                                value={institution.id}
-                              >
-                                {institution.name}
-                                {data.connections.some(
-                                  (connection) =>
-                                    connection.institutionId ===
-                                      institution.id &&
-                                    connection.status === "connected",
-                                )
-                                  ? " — connected"
-                                  : ""}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <button
-                          className="button primary"
-                          disabled={busy || loading}
-                        >
-                          {busy ? "Connecting…" : "Connect institution"}
-                          <Icon name="arrow" size={16} />
-                        </button>
-                      </form>
-                    </section>
-                  )}
                   <div className="accounts-heading">
                     <span>
                       {data.accounts.length} accounts across{" "}
@@ -704,19 +652,20 @@ function App({
                     </span>
                     <span>Balances are last-known values</span>
                   </div>
+                  {!data.accounts.length && <div className="empty-state"><h3>No accounts yet</h3><p>Your accounts will appear here after data is imported.</p></div>}
                   {data.connections.map((connection) => {
                     const institution = data.institutions.find(
                       (institution) =>
                         institution.id === connection.institutionId,
                     )!;
                     const accounts = data.accounts.filter(
-                      (account) => account.institutionId === institution.id,
+                      (account) => account.connectionId === connection.id,
                     );
                     const connected = connection.status === "connected";
                     return (
                       <section
                         className="panel institution-panel"
-                        key={institution.id}
+                        key={connection.id}
                       >
                         <div className="institution-heading">
                           <span
@@ -727,9 +676,9 @@ function App({
                           <div>
                             <h2>{institution.name}</h2>
                             <p>
-                              {connected
+                              {connected && connection.lastSyncAt
                                 ? `Last successful sync ${new Date(connection.lastSyncAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`
-                                : "Disconnected · Your imported history is retained"}
+                                : connected ? "No successful sync recorded" : "Disconnected · Your imported history is retained"}
                             </p>
                           </div>
                           <span
@@ -738,51 +687,6 @@ function App({
                             <span className="status-dot" />
                             {connected ? "Connected" : "Disconnected"}
                           </span>
-                          {connected ? (
-                            <>
-                              <button
-                                className="button"
-                                disabled={busy || loading}
-                                onClick={() =>
-                                  void mutate(
-                                    `/connections/${institution.id}/sync`,
-                                    undefined,
-                                    "Demo changes synced. Your expense reports are up to date.",
-                                  )
-                                }
-                              >
-                                <Icon name="sync" size={16} />
-                                Sync demo data
-                              </button>
-                              <button
-                                className="text-button disconnect-button"
-                                disabled={busy || loading}
-                                onClick={() =>
-                                  void mutate(
-                                    `/connections/${institution.id}/disconnect`,
-                                    undefined,
-                                    `${institution.name} disconnected. Your history is still available.`,
-                                  )
-                                }
-                              >
-                                Disconnect
-                              </button>
-                            </>
-                          ) : (
-                            <button
-                              className="button"
-                              disabled={busy || loading}
-                              onClick={() =>
-                                void mutate(
-                                  "/connections",
-                                  { institutionId: institution.id },
-                                  `${institution.name} reconnected.`,
-                                )
-                              }
-                            >
-                              Reconnect
-                            </button>
-                          )}
                         </div>
                         <div className="account-list">
                           {accounts.map((account) => (
@@ -838,10 +742,10 @@ function App({
                   <div className="account-explainer">
                     <Icon name="leaf" size={23} />
                     <div>
-                      <h3>Your history stays yours</h3>
+                      <h3>Your account history</h3>
                       <p>
-                        Disconnecting stops new imports. Existing accounts and
-                        transactions remain available in your expense reports.
+                        Account balances and imported history are stored in your
+                        personal ledger. Bank connection tools are coming next.
                       </p>
                     </div>
                   </div>
@@ -854,7 +758,7 @@ function App({
                 <span>A little more clarity.</span>
               </span>
               <span>
-                Sample history through {dateName(data.asOf)},{" "}
+                {data.seeded ? "Sample history through" : "Workspace as of"} {dateName(data.asOf)},{" "}
                 {data.asOf.slice(0, 4)}
               </span>
             </footer>
