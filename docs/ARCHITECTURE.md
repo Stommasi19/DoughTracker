@@ -93,10 +93,48 @@ flowchart TB
     Backend --> PG
 ```
 
-The backend is one deployable modular monolith. Connections, Ledger, and
-Insights are folders/namespaces containing concrete application classes inside
-one .NET project. They call one another in process; there are no internal HTTP
-APIs, service credentials, or separate deployments.
+The backend is one deployable modular monolith. It is one .NET solution with an
+executable Api project and multiple referenced class-library projects.
+Connections, Ledger, and Insights remain code boundaries, but they call one
+another in process; there are no internal HTTP APIs, service credentials, or
+separate deployments.
+
+The starting project layout is intentionally small:
+
+```text
+DoughTracker/
+  DoughTracker.slnx
+  src/
+    API/                           # executable HTTP API and composition root
+    Application/                   # use cases and orchestration
+    Domain/                        # financial model and business rules
+    Infrastructure/                # PostgreSQL, Plaid, and secret storage
+  tests/
+    Application.Tests/
+    API.IntegrationTests/
+```
+
+The production reference graph is acyclic, not a single linear chain:
+
+```text
+API -> Application and Infrastructure
+Application -> Domain
+Infrastructure -> Application and Domain
+```
+
+`Domain` has no project dependencies. `Application` groups the Connections,
+Ledger, and Insights use cases without requiring MediatR or strict CQRS.
+`Infrastructure` depends on and implements contracts owned by Application.
+`API` is the executable composition root: endpoint classes depend on
+Application, while `Program.cs` references Infrastructure only to register its
+implementations and start the application. Application tests exercise use cases
+and domain rules; API integration tests boot Api and exercise the real HTTP
+pipeline and PostgreSQL integration.
+
+New finance capabilities first grow as feature folders through Domain,
+Application, and Api. Split a capability such as Budgeting or Investments into
+its own module projects only after it has a distinct model or release boundary;
+do not create empty future modules now.
 
 ### 5.1 Web application
 
@@ -452,8 +490,9 @@ architecture.
 
 ### AD-1: Modular monolith
 
-**Decision:** Deploy one .NET backend. Connections, Ledger, and Insights remain
-separate folders/namespaces with concrete classes inside the same project.
+**Decision:** Deploy one .NET backend assembled by API from Application,
+Domain, and Infrastructure projects. Connections, Ledger, and Insights remain
+feature folders/namespaces across the relevant projects.
 
 **Why:** The modules preserve domain boundaries and make the architecture easy
 to reason about without multiplying deployments, network calls, authentication,
@@ -522,8 +561,8 @@ dual models, replay rules, or mediator ceremony that v1 does not need.
 
 ## 16. Implementation order
 
-1. Create one ASP.NET Core project with Connections, Ledger, and Insights
-   folders/namespaces, plus the Docker Compose environment.
+1. Create the .NET solution; API, Application, Domain, and Infrastructure
+   projects; both test projects; and the Docker Compose environment.
 2. Add Firebase authentication and UID-based API authorization.
 3. Build Ledger account, transaction, filtering, and recategorization endpoints
    with deterministic mock data.
