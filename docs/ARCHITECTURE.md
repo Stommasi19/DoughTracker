@@ -2,7 +2,7 @@
 
 Status: Approved direction for the first expense-report release
 
-Last updated: 2026-10-01
+Last updated: 2026-10-02
 
 ## 1. Purpose
 
@@ -20,8 +20,8 @@ implementation details that can be decided when their feature is built.
 1. Store a trustworthy local financial history and use cursor-based provider
    calls only to ask what changed since the last successful synchronization.
 2. Keep provider-specific behavior out of the ledger and reporting domains.
-3. Exercise clear domain boundaries, background work, retries, and
-   observability without creating deployment or network boundaries prematurely.
+3. Exercise clear domain boundaries, durable event messaging, retries, and
+   observability without creating separate application deployments prematurely.
 4. Run the full application locally through Docker Compose at no cost.
 5. Leave a credible path to Azure and multiple users without building either
    prematurely.
@@ -41,12 +41,15 @@ implementation details that can be decided when their feature is built.
 - Plaid categories with persistent manual category overrides.
 - Connection status and last-successful-sync visibility.
 - Local account deletion and Plaid disconnection as separate operations.
+- RabbitMQ event transport through MassTransit.
+- A PostgreSQL-backed transactional outbox and consumer inbox.
 
 ### Deferred
 
 - Budgets, investments, retirement holdings, forecasts, and net worth.
 - Transaction splits, notes, and user-defined categorization rules.
-- Event sourcing, strict CQRS, a message broker, and materialized report stores.
+- Event sourcing, strict CQRS, materialized report stores, and separately
+  deployed consumers.
 - Public cloud deployment and paid provider plans.
 - Financial-field encryption design.
 - Custom categories and formal downloadable reports.
@@ -62,6 +65,7 @@ flowchart LR
     Plaid -->|HTTPS webhook notification| Backend
     Backend -->|store normalized records| Postgres[(PostgreSQL)]
     Backend -->|store and retrieve token by reference| Secrets[Secret store]
+    Backend <-->|commands and events| RabbitMQ[RabbitMQ]
 ```
 
 Plaid is a notification and ingestion source, not DoughTracker's system of
@@ -79,6 +83,7 @@ flowchart TB
     subgraph Docker Compose
         Backend["DoughTracker Backend<br/>ASP.NET Core API + sync worker<br/>Connections | Ledger | Insights"]
         PG[("PostgreSQL<br/>one DoughTracker database")]
+        RabbitMQ["RabbitMQ<br/>durable commands and events"]
         SecretAdapter[Local secret-store adapter]
     end
 
@@ -91,13 +96,19 @@ flowchart TB
     Backend -->|Link and incremental sync| Plaid
     Backend --> SecretAdapter
     Backend --> PG
+    Backend <--> RabbitMQ
 ```
 
 The backend is one deployable modular monolith. It is one .NET solution with an
-executable Api project and multiple referenced class-library projects.
+executable API project and multiple referenced class-library projects.
 Connections, Ledger, and Insights remain code boundaries, but they call one
 another in process; there are no internal HTTP APIs, service credentials, or
 separate deployments.
+
+Synchronous work needed to answer the current HTTP request uses in-process
+calls. MassTransit and RabbitMQ are reserved for durable background commands
+and events that may complete after the request. They do not replace ordinary
+method calls between modules.
 
 The starting project layout is intentionally small:
 
@@ -108,7 +119,7 @@ DoughTracker/
     API/                           # executable HTTP API and composition root
     Application/                   # use cases and orchestration
     Domain/                        # financial model and business rules
-    Infrastructure/                # PostgreSQL, Plaid, and secret storage
+    Infrastructure/                # PostgreSQL, Plaid, MassTransit, and secrets
   tests/
     Application.Tests/
     API.IntegrationTests/
@@ -123,16 +134,17 @@ Infrastructure -> Application and Domain
 ```
 
 `Domain` has no project dependencies. `Application` groups the Connections,
-Ledger, and Insights use cases without requiring MediatR or strict CQRS.
-`Infrastructure` depends on and implements contracts owned by Application.
+Ledger, and Insights use cases plus transport-neutral message contracts without
+requiring MediatR or strict CQRS. `Infrastructure` depends on and implements
+contracts owned by Application, including MassTransit producers and consumers.
 `API` is the executable composition root: endpoint classes depend on
 Application, while `Program.cs` references Infrastructure only to register its
 implementations and start the application. Application tests exercise use cases
-and domain rules; API integration tests boot Api and exercise the real HTTP
+and domain rules; API integration tests boot API and exercise the real HTTP
 pipeline and PostgreSQL integration.
 
 New finance capabilities first grow as feature folders through Domain,
-Application, and Api. Split a capability such as Budgeting or Investments into
+Application, and API. Split a capability such as Budgeting or Investments into
 its own module projects only after it has a distinct model or release boundary;
 do not create empty future modules now.
 
