@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.Json;
+using Application;
 using FirebaseAdmin;
 using FirebaseAdmin.Auth;
 using Google.Apis.Auth.OAuth2;
@@ -105,6 +106,8 @@ public class AuthenticationTests
             var me = await client.GetAsync("/api/v1/me");
             Assert.Equal(HttpStatusCode.OK, me.StatusCode);
             Assert.Equal("alice", (await me.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("uid").GetString());
+            Assert.Null(factory.Services.GetService<DemoWorkspace>());
+            Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync("/api/demo/workspace")).StatusCode);
             Assert.Equal(HttpStatusCode.NotFound,
                 (await client.PostAsJsonAsync("/api/v1/dev/token", new { uid = "alice" })).StatusCode);
 

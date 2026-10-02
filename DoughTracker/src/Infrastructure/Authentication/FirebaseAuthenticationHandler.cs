@@ -5,9 +5,12 @@ using System.Text.Encodings.Web;
 using FirebaseAdmin.Auth;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
-namespace API.Authentication;
+namespace Infrastructure.Authentication;
 
 public sealed class FirebaseAuthenticationOptions : AuthenticationSchemeOptions
 {

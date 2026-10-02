@@ -4,6 +4,8 @@ An evolving expense tracking application that will be expanded into a budgeting 
 ## Project documentation
 
 - [Architecture handoff](docs/ARCHITECTURE.md)
+- [Frontend preview, screen map, and mock API](docs/FRONTEND_FOUNDATION.md)
+- [Firebase sign-in, local mock, and production setup](docs/FIREBASE_AUTH.md)
 - [Sequential backend tasks](docs/BACKEND-TASKS.md)
 
 ## Start the backend locally
@@ -61,6 +63,10 @@ The response is `{"uid":"local-user"}`. Use different UIDs to exercise different
 owners. Tokens expire after one hour; request a new one after recreating the Docker
 container. These are backend-local protected tokens, not Firebase JWTs, so the
 frontend should send them directly as bearer tokens during mock development.
+
+The frontend local sign-in mock uses the Firebase Authentication emulator for
+the normal login UI, then obtains one of these backend tokens for its signed-in
+UID. See the [frontend authentication guide](docs/FIREBASE_AUTH.md).
 
 All application endpoints require authentication by default. `/health` and the
 development OpenAPI document remain public. The mock token endpoint exists only
