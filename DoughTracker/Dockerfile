@@ -7,6 +7,7 @@ RUN dotnet publish src/API/API.csproj -c Release -o /app/publish /p:UseAppHost=f
 FROM mcr.microsoft.com/dotnet/aspnet:10.0.12
 WORKDIR /app
 COPY --from=build /app/publish .
+RUN mkdir /app/secrets && chown $APP_UID /app/secrets
 USER $APP_UID
 EXPOSE 8080
 ENTRYPOINT ["dotnet", "API.dll"]

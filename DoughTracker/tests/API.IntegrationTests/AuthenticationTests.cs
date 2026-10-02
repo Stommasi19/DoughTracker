@@ -108,7 +108,7 @@ public class AuthenticationTests
             Assert.Equal("alice", (await me.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("uid").GetString());
             Assert.Null(factory.Services.GetService<DemoWorkspace>());
             Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync("/api/demo/workspace")).StatusCode);
-            Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsJsonAsync("/api/v1/connections", new { institutionId = "capital-one" })).StatusCode);
+            Assert.Equal(HttpStatusCode.MethodNotAllowed, (await client.PostAsJsonAsync("/api/v1/connections", new { institutionId = "capital-one" })).StatusCode);
             Assert.Equal(HttpStatusCode.NotFound,
                 (await client.PostAsJsonAsync("/api/v1/dev/token", new { uid = "alice" })).StatusCode);
 

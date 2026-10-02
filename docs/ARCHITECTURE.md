@@ -316,6 +316,8 @@ exact DTOs belong to implementation design.
 - `POST /api/v1/connections/exchange-token`
 - `GET /api/v1/connections`
 - `POST /api/v1/connections/{id}/reconnect`
+- `POST /api/v1/connections/{id}/reconnect/complete`
+- `POST /api/v1/connections/{id}/sync`
 - `DELETE /api/v1/connections/{id}`
 - `POST /webhooks/plaid`
 
@@ -477,8 +479,10 @@ same Plaid Item.
   start with a threat model because encrypting query fields changes search and
   aggregation.
 
-The local secret-store product and HTTPS development-tunnel product remain open
-implementation choices.
+Local tokens use Data Protection-encrypted files on a persistent, owner-restricted
+volume. Keys and ciphertext share that volume; separate key custody is deferred.
+See [bank connection operations](BANK_CONNECTIONS.md). The HTTPS development-tunnel
+product remains open until remote webhook delivery is exercised.
 
 ## 13. Reliability and observability
 
@@ -514,7 +518,8 @@ Docker Compose runs:
 - Web SPA development server.
 - One .NET backend containing the API, domain modules, and sync worker.
 - PostgreSQL.
-- The selected local secret store, when real tokens are introduced.
+- RabbitMQ with persistent queues.
+- A persistent volume for encrypted token receipts and Data Protection keys.
 
 A development HTTPS tunnel is required only when Plaid must deliver real
 webhooks to localhost. Sandbox webhook fixtures should cover normal development.
@@ -548,16 +553,18 @@ and failure modes.
 **Revisit when:** A module needs independent scaling, deployment cadence, or
 failure isolation strongly enough to justify its operational cost.
 
-### AD-2: In-process calls before messaging
+### AD-2: In-process domain calls and durable background messaging
 
-**Decision:** Modules call concrete application classes in process. Connections
-uses a narrow PostgreSQL job queue for webhook and scheduled sync work.
+**Decision:** Modules call application classes in process. Connections sends sync
+commands through RabbitMQ/MassTransit, using a PostgreSQL transactional outbox and
+consumer inbox in the existing backend process. This reconciles AD-2 with the
+approved v1 scope and synchronization guarantees.
 
-**Why:** It satisfies the v1 flow without internal HTTP, a broker, an emulator,
-or an event-contract lifecycle.
+**Why:** Domain calls need no internal HTTP; asynchronous sync work must survive
+broker outages, duplicate delivery, and process restarts.
 
-**Revisit when:** A real asynchronous fan-out or independent deployment need
-appears.
+**Revisit when:** Independent worker scaling or deployment justifies a separate
+process. The current release keeps consumers inside the backend.
 
 ### AD-3: A normalized local ledger
 
@@ -647,7 +654,7 @@ The architecture is implemented when all of these scenarios are demonstrable:
 
 These are intentionally postponed until the related implementation starts:
 
-- Local secret-store selection.
+- Separate key custody if the local token-store threat model later requires it.
 - Local HTTPS tunnel selection.
 - Financial-field encryption threat model and design.
 - Component library, styling system, and chart library.

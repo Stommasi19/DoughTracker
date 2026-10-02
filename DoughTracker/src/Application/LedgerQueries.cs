@@ -12,6 +12,8 @@ public record WorkspaceMetadata(string DefaultMonth, string DefaultCurrency, str
     string[] Currencies, DateOnly? AsOf, bool Seeded)
 {
     public DemoInstitution[] ConnectableInstitutions { get; init; } = [];
+    public bool PlaidEnabled { get; init; }
+    public bool SyncEnabled { get; init; }
 }
 public record TransactionPage(LedgerTransaction[] Items, int Page, int PageSize, int TotalCount);
 public record ReportResult(DateOnly DateFrom, DateOnly DateTo, CurrencyReport[] Currencies);

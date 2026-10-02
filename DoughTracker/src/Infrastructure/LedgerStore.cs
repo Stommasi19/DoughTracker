@@ -76,10 +76,16 @@ public sealed class LedgerStore(LedgerDbContext db) : ILedgerStore
 
     public async Task<LedgerTransaction?> SetCategory(string owner, Guid id, string? category, CancellationToken ct)
     {
+        var connectionId = await Owned(owner).Where(t => t.Id == id).Select(t => (Guid?)t.Account.ConnectionId).SingleOrDefaultAsync(ct);
+        if (connectionId is null) return null;
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        await ConnectionStore.Lock(db, connectionId.Value, ct);
         var updated = await db.Transactions.Where(t => t.Id == id && t.OwnerId == owner &&
             t.Account.OwnerId == owner && t.Account.DeletedAt == null && t.RemovedAt == null)
             .ExecuteUpdateAsync(setters => setters.SetProperty(t => t.ManualCategoryId, category), ct);
-        return updated == 0 ? null : await Owned(owner).Where(t => t.Id == id).Select(Dto).SingleAsync(ct);
+        var result = updated == 0 ? null : await Owned(owner).Where(t => t.Id == id).Select(Dto).SingleAsync(ct);
+        await transaction.CommitAsync(ct);
+        return result;
     }
 
     public Task<LedgerTransaction[]> ReportRows(string owner, LedgerFilter filter, DateOnly from, DateOnly to, CancellationToken ct) =>

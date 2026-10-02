@@ -12,7 +12,7 @@ using Npgsql;
 
 namespace API.IntegrationTests;
 
-public sealed class PostgresFactAttribute : FactAttribute
+public class PostgresFactAttribute : FactAttribute
 {
     public PostgresFactAttribute()
     {
@@ -21,6 +21,7 @@ public sealed class PostgresFactAttribute : FactAttribute
     }
 }
 
+[Collection("PostgreSQL")]
 public class PersistentLedgerTests
 {
     [Fact]
@@ -215,6 +216,8 @@ public class PersistentLedgerTests
         var connected = await connector.PostAsJsonAsync("/api/v1/connections", new { institutionId = "capital-one", ownerId = "bob" });
         connected.EnsureSuccessStatusCode();
         var connectionId = (await connected.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("connectionId").GetGuid();
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, (await connector.PostAsJsonAsync($"/api/v1/connections/{connectionId}/sync", new { })).StatusCode);
+        Assert.False(await db.SyncRuns.AnyAsync());
         var connectedAccounts = (await Read(connector, "/api/v1/accounts")).GetProperty("items");
         Assert.Single(connectedAccounts.EnumerateArray());
         Assert.Equal("360 checking", connectedAccounts[0].GetProperty("name").GetString());
