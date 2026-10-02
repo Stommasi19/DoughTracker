@@ -8,6 +8,8 @@ An evolving expense tracking application that will be expanded into a budgeting 
 - [Firebase sign-in, local mock, and production setup](docs/FIREBASE_AUTH.md)
 - [Sequential backend tasks](docs/BACKEND-TASKS.md)
 - [Milestone 1 implementation plan](docs/MILESTONE-1-PLAN.md)
+- [Milestone 2 implementation plan](docs/MILESTONE-2-PLAN.md)
+- [Plaid connections, synchronization, and verification](docs/BANK_CONNECTIONS.md)
 - [Persistent ledger API and verification](docs/LEDGER_API.md)
 
 ## Start the backend locally
@@ -49,8 +51,10 @@ local password `local-test-words-42`. Run the frontend with
 `API_PROXY_TARGET=http://127.0.0.1:5084 npm --prefix DoughTrackerUI run dev`.
 A new, unseeded identity sees an empty ledger. See the [API guide](docs/LEDGER_API.md)
 for the complete setup, custom seed UIDs, migrations, and PostgreSQL checks.
-The frontend remains a separate process; RabbitMQ/MassTransit arrive with the
-synchronization worker in milestone 2.
+The frontend remains a separate process. Compose now also starts RabbitMQ;
+Milestone 2 adds durable synchronization and Plaid Sandbox Link. Plaid is disabled
+until backend credentials are configured. Follow the [bank connection guide](docs/BANK_CONNECTIONS.md)
+for configuration, token storage, lifecycle routes, and recorded local checks.
 
 Follow the [backend task checklist](docs/BACKEND-TASKS.md) for implementation order,
 completion checks, and decisions needed along the way.
@@ -75,8 +79,8 @@ curl --fail http://localhost:5084/api/v1/me \
 ```
 
 The response is `{"uid":"local-user"}`. Use different UIDs to exercise different
-owners. Tokens expire after one hour; request a new one after recreating the Docker
-container. These are backend-local protected tokens, not Firebase JWTs, so the
+owners. Tokens expire after one hour; request a new one when they expire. Compose
+persists their protection keys in the token-store volume. These are backend-local protected tokens, not Firebase JWTs, so the
 frontend should send them directly as bearer tokens during mock development.
 
 The frontend local sign-in mock uses the Firebase Authentication emulator for

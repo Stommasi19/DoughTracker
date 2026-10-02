@@ -997,6 +997,16 @@ select {
 .disconnect-button {
   color: var(--muted);
 }
+.connection-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-md);
+  padding: var(--space-lg);
+}
+.account-row > button {
+  grid-column: 2 / -1;
+  justify-self: start;
+}
 .account-row {
   display: grid;
   grid-template-columns: 24px minmax(200px, 1fr) 180px 180px;

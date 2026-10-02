@@ -7,6 +7,10 @@ export type Connection = {
   institutionId: string;
   status: string;
   lastSyncAt: string | null;
+  institutionName: string;
+  provider: string;
+  lastErrorCode: string | null;
+  syncStatus: string | null;
 };
 export type Account = {
   id: string;
@@ -51,6 +55,8 @@ export type SpendingGroup = {
   count: number;
 };
 type WorkspaceMetadata = {
+  plaidEnabled: boolean;
+  syncEnabled: boolean;
   connectableInstitutions: Institution[];
   defaultMonth: string;
   defaultCurrency: string;
@@ -118,10 +124,11 @@ type Spending = Pick<Snapshot["report"], "categories" | "merchants" | "daily" | 
 type ReportDates = Pick<Snapshot["report"], "dateFrom" | "dateTo" | "previousDateFrom" | "previousDateTo">;
 
 export async function loadWorkspace(params: URLSearchParams, options: RequestInit): Promise<Snapshot> {
-  const [workspace, { items: accounts }, { items: categories }] = await Promise.all([
+  const [workspace, { items: accounts }, { items: categories }, { items: connections }] = await Promise.all([
     request<WorkspaceMetadata>("/workspace", options),
     request<{ items: Account[] }>("/accounts", options),
     request<{ items: Category[] }>("/categories", options),
+    request<{ items: Connection[] }>("/connections", options),
   ]);
   const month = params.get("month") || workspace.defaultMonth;
   const currency = params.get("currency") || workspace.defaultCurrency;
@@ -135,11 +142,8 @@ export async function loadWorkspace(params: URLSearchParams, options: RequestIni
     request<ReportDates & { currencies: (Summary & { currency: string })[] }>(`/reports/summary?${reportFilters}`, options),
     request<{ currencies: (Spending & { currency: string })[] }>(`/reports/spending?${reportFilters}`, options),
   ]);
-  const connections = [...new Map(accounts.map(a => [a.connectionId, {
-    id: a.connectionId, institutionId: a.institutionId, status: a.connectionStatus, lastSyncAt: a.lastSyncAt,
-  }])).values()];
-  const institutions = [...new Map(accounts.map(a => [a.institutionId, {
-    id: a.institutionId, name: a.institutionName, initials: a.institutionName.slice(0, 2).toUpperCase(),
+  const institutions = [...new Map(connections.map(c => [c.institutionId, {
+    id: c.institutionId, name: c.institutionName, initials: c.institutionName.slice(0, 2).toUpperCase(),
   }])).values()];
   const report = { ...summary.currencies[0], ...spending.currencies[0],
     dateFrom: summary.dateFrom, dateTo: summary.dateTo,

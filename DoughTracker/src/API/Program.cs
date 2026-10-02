@@ -26,19 +26,33 @@ app.UseExceptionHandler(new ExceptionHandlerOptions {
         var exception = context.Features.Get<IExceptionHandlerFeature>()!.Error;
         var requestError = exception as LedgerRequestException;
         var badRequest = exception as BadHttpRequestException;
-        var storage = exception is NpgsqlException or DbUpdateException or TimeoutException;
-        var status = requestError?.Status ?? badRequest?.StatusCode ?? (storage ? 503 : 500);
-        if (requestError is null && badRequest is null)
+        var invalidInput = badRequest is not null || exception is JsonException;
+        var storage = exception is NpgsqlException or DbUpdateException or TimeoutException or PlaidFailure;
+        var status = requestError?.Status ?? badRequest?.StatusCode ?? (invalidInput ? 400 : storage ? 503 : 500);
+        if (requestError is null && !invalidInput)
             app.Logger.LogError("Request failed: {ErrorType}, trace {TraceId}", exception.GetType().Name, context.TraceIdentifier);
         await Results.Problem(statusCode: status, title: status == 404 ? "Resource unavailable" :
             status == 400 ? "Invalid request" : "Request unavailable",
-            detail: requestError?.Message ?? (badRequest is not null ? "Provide a valid request body and query parameters." :
+            detail: requestError?.Message ?? (invalidInput ? "Provide a valid request body and query parameters." :
                 "The ledger could not complete this request. Try again shortly."))
             .ExecuteAsync(context);
     }
 });
 app.UseAuthentication();
 app.UseAuthorization();
+app.Use(async (context, next) => {
+    if (builder.Configuration.GetValue<bool>("Plaid:Enabled") && context.User.Identity?.IsAuthenticated == true &&
+        context.Request.Method == "GET" && (context.Request.Path.StartsWithSegments("/api/v1/accounts") ||
+        context.Request.Path.StartsWithSegments("/api/v1/transactions") || context.Request.Path.StartsWithSegments("/api/v1/reports")))
+    {
+        try { await context.RequestServices.GetRequiredService<ConnectionStore>().Reconcile(
+            context.User.FindFirstValue(ClaimTypes.NameIdentifier), false, context.RequestAborted); }
+        catch (Exception error) when (error is not OperationCanceledException) {
+            app.Logger.LogWarning("Stale-read synchronization unavailable: {ErrorType}", error.GetType().Name);
+        }
+    }
+    await next(context);
+});
 
 if (app.Environment.IsDevelopment())
 {
@@ -83,6 +97,7 @@ if (app.Environment.IsDevelopment())
 
 app.MapGet("/health", () => Results.Ok(new { status = "healthy" })).AllowAnonymous();
 app.MapLedger();
+app.MapConnections();
 
 var api = app.MapGroup("/api/v1").RequireAuthorization();
 api.MapGet("/me", (ClaimsPrincipal user) => Results.Ok(new

@@ -11,10 +11,37 @@ services:
       DevelopmentSeed__Enabled: "${SEED_DEVELOPMENT:-false}"
       DevelopmentSeed__Owners__0: "${SEED_OWNER_A:-alice}"
       DevelopmentSeed__Owners__1: "${SEED_OWNER_B:-bob}"
+      Messaging__Enabled: "true"
+      RabbitMq__Host: rabbitmq
+      RabbitMq__Username: doughtracker
+      RabbitMq__Password: "${RABBITMQ_PASSWORD:-local-development-only}"
+      Plaid__Enabled: "${PLAID_ENABLED:-false}"
+      Plaid__ClientId: "${PLAID_CLIENT_ID:-}"
+      Plaid__Secret: "${PLAID_SECRET:-}"
+      Plaid__WebhookUrl: "${PLAID_WEBHOOK_URL:-}"
+      Plaid__RedirectUri: "${PLAID_REDIRECT_URI:-}"
+      Secrets__Directory: /app/secrets
       ConnectionStrings__DoughTracker: "Host=postgres;Database=doughtracker;Username=doughtracker;Password=${POSTGRES_PASSWORD:-local-development-only}"
     depends_on:
       postgres:
         condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+      - plaid-secrets:/app/secrets
+
+  rabbitmq:
+    image: rabbitmq:4.1-management
+    environment:
+      RABBITMQ_DEFAULT_USER: doughtracker
+      RABBITMQ_DEFAULT_PASS: "${RABBITMQ_PASSWORD:-local-development-only}"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
   postgres:
     image: postgres:18
@@ -32,3 +59,5 @@ services:
 
 volumes:
   postgres-data:
+  rabbitmq-data:
+  plaid-secrets:

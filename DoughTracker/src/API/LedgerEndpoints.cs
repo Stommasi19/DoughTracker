@@ -19,7 +19,9 @@ public static class LedgerEndpoints
         var api = app.MapGroup("/api/v1").RequireAuthorization().WithTags("Ledger");
         api.MapGet("/workspace", async (LedgerQueries ledger, ClaimsPrincipal user, CancellationToken ct) =>
             Results.Ok((await ledger.Workspace(Owner(user), ct)) with {
-                ConnectableInstitutions = app.Environment.IsDevelopment() ? PlaidDemoData.Institutions : []
+                ConnectableInstitutions = app.Environment.IsDevelopment() && !app.Configuration.GetValue<bool>("Plaid:Enabled") ? PlaidDemoData.Institutions : [],
+                PlaidEnabled = app.Configuration.GetValue<bool>("Plaid:Enabled"),
+                SyncEnabled = app.Configuration.GetValue<bool>("Messaging:Enabled")
             }))
             .Produces<WorkspaceMetadata>().ProducesProblem(503)
             .WithDescription("Defaults and available periods/currencies from the owner's active ledger. Default month is the latest transaction month, or current UTC month for empty history. USD is preferred when present; otherwise the first stored currency, with USD for an empty workspace. AsOf is the latest visible transaction date, null for empty history. Periods include the current UTC month.");

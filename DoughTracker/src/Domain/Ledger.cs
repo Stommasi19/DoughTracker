@@ -11,9 +11,29 @@ public class FinancialConnection
     public string Status { get; set; } = "connected";
     public DateTimeOffset? LastSyncAt { get; set; }
     public string? LastErrorCode { get; set; }
+    public string? SecretReference { get; set; }
+    public string? SyncCursor { get; set; }
+    public DateTimeOffset? LastCheckedAt { get; set; }
+    public DateTimeOffset? ProviderRevokedAt { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 }
+
+public class SyncRun
+{
+    public Guid Id { get; set; }
+    public Guid ConnectionId { get; set; }
+    public string Reason { get; set; } = "";
+    public string Status { get; set; } = "requested";
+    public int AttemptCount { get; set; }
+    public string? LastErrorCode { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset? CompletedAt { get; set; }
+    public DateTimeOffset RequestedAt { get; set; }
+}
+
+// IDs in a normalized provider batch are provider keys, not internal UUIDs.
+public record SyncBatch(DemoAccount[] Accounts, LedgerBatch Transactions, string NextCursor);
 
 public class Account
 {
