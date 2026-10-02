@@ -2,18 +2,41 @@ using System.Globalization;
 using System.Security.Claims;
 using System.Text.Json;
 using Application;
+using API;
 using Infrastructure;
+using Microsoft.AspNetCore.Diagnostics;
+using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using Microsoft.AspNetCore.DataProtection;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddOpenApi();
+builder.Services.AddProblemDetails();
 builder.Services.AddInfrastructure(builder.Configuration, builder.Environment);
 if (builder.Environment.IsDevelopment())
     builder.Services.AddMockInfrastructure();
 
 var app = builder.Build();
 app.Services.InitializeInfrastructure();
+await app.Services.InitializeLedger(builder.Configuration);
+app.UseExceptionHandler(new ExceptionHandlerOptions {
+    SuppressDiagnosticsCallback = _ => true,
+    ExceptionHandler = async context => {
+        var exception = context.Features.Get<IExceptionHandlerFeature>()!.Error;
+        var requestError = exception as LedgerRequestException;
+        var badRequest = exception as BadHttpRequestException;
+        var storage = exception is NpgsqlException or DbUpdateException or TimeoutException;
+        var status = requestError?.Status ?? badRequest?.StatusCode ?? (storage ? 503 : 500);
+        if (requestError is null && badRequest is null)
+            app.Logger.LogError("Request failed: {ErrorType}, trace {TraceId}", exception.GetType().Name, context.TraceIdentifier);
+        await Results.Problem(statusCode: status, title: status == 404 ? "Resource unavailable" :
+            status == 400 ? "Invalid request" : "Request unavailable",
+            detail: requestError?.Message ?? (badRequest is not null ? "Provide a valid request body and query parameters." :
+                "The ledger could not complete this request. Try again shortly."))
+            .ExecuteAsync(context);
+    }
+});
 app.UseAuthentication();
 app.UseAuthorization();
 
@@ -59,6 +82,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.MapGet("/health", () => Results.Ok(new { status = "healthy" })).AllowAnonymous();
+app.MapLedger();
 
 var api = app.MapGroup("/api/v1").RequireAuthorization();
 api.MapGet("/me", (ClaimsPrincipal user) => Results.Ok(new

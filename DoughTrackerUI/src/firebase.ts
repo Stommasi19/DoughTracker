@@ -38,7 +38,7 @@ try {
     popupRedirectResolver: browserPopupRedirectResolver,
   });
   if (usesAuthEmulator && !auth.emulatorConfig)
-    connectAuthEmulator(auth, "http://127.0.0.1:9099");
+    connectAuthEmulator(auth, import.meta.env.VITE_FIREBASE_AUTH_EMULATOR_URL || "http://127.0.0.1:9099");
 } catch {
   auth = null;
   authConfigurationError = import.meta.env.DEV

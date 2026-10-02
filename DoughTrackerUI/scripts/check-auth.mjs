@@ -17,7 +17,7 @@ const app = initializeApp({
   projectId: "demo-doughtracker",
 });
 const auth = initializeAuth(app, { persistence: inMemoryPersistence });
-connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });
+connectAuthEmulator(auth, process.env.AUTH_EMULATOR_URL || "http://127.0.0.1:9099", { disableWarnings: true });
 const email = `check-${crypto.randomUUID()}@example.test`;
 const password = "local-test-words-42";
 try {
@@ -34,8 +34,8 @@ try {
   await signInWithEmailAndPassword(auth, email, password);
   assert.equal(auth.currentUser?.uid, uid);
   assert.ok(await auth.currentUser.getIdToken());
-  const api = "http://127.0.0.1:5083";
-  assert.equal((await fetch(`${api}/api/demo/workspace`)).status, 401);
+  const api = process.env.API_BASE_URL || "http://127.0.0.1:5083";
+  assert.equal((await fetch(`${api}/api/v1/accounts`)).status, 401);
   const response = await fetch(`${api}/api/v1/dev/token`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -49,7 +49,7 @@ try {
   assert.equal(me.status, 200);
   assert.equal((await me.json()).uid, uid);
   assert.equal(
-    (await fetch(`${api}/api/demo/workspace`, { headers })).status,
+    (await fetch(`${api}/api/v1/accounts`, { headers })).status,
     200,
   );
   await deleteUser(auth.currentUser);

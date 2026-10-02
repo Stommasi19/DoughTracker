@@ -1,9 +1,10 @@
-FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0.401 AS build
 WORKDIR /source
-COPY src/ ./src/
+COPY global.json ./
+COPY DoughTracker/src/ ./src/
 RUN dotnet publish src/API/API.csproj -c Release -o /app/publish /p:UseAppHost=false
 
-FROM mcr.microsoft.com/dotnet/aspnet:9.0
+FROM mcr.microsoft.com/dotnet/aspnet:10.0.12
 WORKDIR /app
 COPY --from=build /app/publish .
 USER $APP_UID

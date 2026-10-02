@@ -103,30 +103,8 @@ public class DemoWorkspace(DemoSeed seed)
                 t.Description.Contains(search, StringComparison.OrdinalIgnoreCase));
             var all = available.ToArray();
             var current = all.Where(t => t.Date >= start && t.Date < end).ToArray();
-            var expenses = current.Where(t => t.Classification == "expense" && !t.Pending).ToArray();
-            var previous = all.Where(t => t.Date >= start.AddMonths(-1) && t.Date < start &&
-                t.Classification == "expense" && !t.Pending).ToArray();
-            var spending = -expenses.Sum(t => t.Amount);
-            var previousSpending = -previous.Sum(t => t.Amount);
             var months = Enumerable.Range(0, 6).Select(n => seed.AsOf.AddMonths(-n).ToString("yyyy-MM")).ToArray();
-            var days = DateTime.DaysInMonth(start.Year, start.Month);
-            var priorDays = DateTime.DaysInMonth(start.AddMonths(-1).Year, start.AddMonths(-1).Month);
-            var report = new ExpenseReport(spending, previousSpending,
-                previousSpending == 0 ? null : decimal.Round((spending - previousSpending) / Math.Abs(previousSpending) * 100, 1),
-                -current.Where(t => t.Classification == "expense" && t.Pending).Sum(t => t.Amount),
-                expenses.Where(t => t.Amount > 0).Sum(t => t.Amount), decimal.Round(spending / days, 2),
-                expenses.Count(t => t.Amount < 0),
-                expenses.GroupBy(t => t.CategoryId).Select(g => new SpendingGroup(g.Key,
-                    Categories.FirstOrDefault(c => c.Id == g.Key)?.Name ?? "Uncategorized",
-                    -g.Sum(t => t.Amount), g.Count())).OrderByDescending(g => g.Amount).ToArray(),
-                expenses.GroupBy(t => t.Merchant).Select(g => new SpendingGroup(g.Key, g.Key,
-                    -g.Sum(t => t.Amount), g.Count())).OrderByDescending(g => g.Amount).Take(5).ToArray(),
-                Enumerable.Range(1, days).Select(day => new DailySpending(day,
-                    -expenses.Where(t => t.Date.Day <= day).Sum(t => t.Amount),
-                    -previous.Where(t => t.Date.Day <= (day == days ? priorDays : Math.Min(day, priorDays))).Sum(t => t.Amount))).ToArray(),
-                months.Reverse().Select(m => new MonthSpending(m,
-                    -all.Where(t => t.Date.ToString("yyyy-MM") == m && t.Classification == "expense" && !t.Pending)
-                        .Sum(t => t.Amount))).ToArray());
+            var report = SpendingReport.Calculate(all, Categories, start, end, start.AddMonths(-1));
             return new(seed.AsOf, month, months, Categories, seed.Institutions,
                 connections.Values.ToArray(), seed.Accounts.Where(a => connections.ContainsKey(a.InstitutionId)).ToArray(),
                 current.OrderByDescending(t => t.Date).ThenBy(t => t.Id).ToArray(), report);

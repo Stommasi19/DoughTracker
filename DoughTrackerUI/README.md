@@ -1,17 +1,20 @@
 # DoughTracker frontend
 
 React, TypeScript, Vite, and plain CSS. Desktop expense dashboard with light and
-dark themes, an interactive ledger, and simulated bank connections.
+dark themes, a persistent owner-scoped ledger, and currency-separated reports.
 
 See [the frontend foundation guide](../docs/FRONTEND_FOUNDATION.md) for setup,
 screen layout, Plaid fixture research, API routes, and next steps.
 
 ```sh
 npm ci
-npm run dev
+npm run seed:users
+API_PROXY_TARGET=http://127.0.0.1:5084 npm run dev
 ```
 
-The development API must also be running on port 5083. Vite serves the UI at
+The Development API and migrated PostgreSQL ledger must also be running. The
+command above uses Docker on port 5084; omit `API_PROXY_TARGET` for a host API on
+5083. See [ledger setup](../docs/LEDGER_API.md). Vite serves the UI at
 <http://127.0.0.1:5173> and proxies `/api` requests to the backend.
 
 ```sh
