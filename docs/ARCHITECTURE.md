@@ -166,11 +166,13 @@ Owns the lifecycle of external financial-data connections:
 - Institution and Plaid Item metadata.
 - Webhook verification and receipt.
 - Incremental-sync cursor, hourly reconciliation, and connection health.
-- A small PostgreSQL-backed durable job queue.
+- Durable sync commands handled through MassTransit and RabbitMQ.
+- A PostgreSQL `sync_runs` record for user-visible status and diagnosis.
 - Provider-to-canonical mapping before applying changes through Ledger classes.
 
-The API and background worker run in the same backend process. A generic job
-system is unnecessary for v1.
+The API, MassTransit consumers, and background reconciliation scheduler run in
+the same backend process. RabbitMQ queues remain durable while that process is
+offline; separate consumer deployment is deferred.
 
 ### 5.3 Ledger module
 
@@ -206,7 +208,7 @@ justifies them.
 | Firebase identity | Firebase | Verified ID token |
 | Plaid Item and institution metadata | Connections module | PostgreSQL |
 | Plaid access token | Secret store | Connections module, by secret reference |
-| Sync cursor and job status | Connections module | PostgreSQL |
+| Sync cursor and run status | Connections module | PostgreSQL |
 | Account and balance | Ledger module | PostgreSQL |
 | Transaction and category override | Ledger module | PostgreSQL |
 | Expense report | Insights module | In-process query over PostgreSQL data |
@@ -240,17 +242,24 @@ This is a logical starting point, not a migration specification.
 | `last_sync_at` / `last_error_code` | User-visible freshness and diagnosis |
 | timestamps | Creation and update auditing |
 
-#### `sync_jobs`
+#### `sync_runs`
 
 | Field | Purpose |
 |---|---|
-| `id` | Job UUID |
+| `id` | Sync-run UUID and message correlation ID |
 | `connection_id` | Connection to synchronize |
 | `reason` | Initial link, webhook, hourly reconciliation, reconnect, or retry |
-| `status` | Pending, processing, completed, or failed |
-| `attempt_count` / `available_at` | Bounded retry scheduling |
+| `status` | Requested, processing, completed, or failed |
+| `attempt_count` | Diagnostic count updated by the consumer |
 | `last_error_code` | Sanitized failure reason; never provider secrets |
 | timestamps | Job lifecycle auditing |
+
+#### MassTransit outbox and inbox tables
+
+MassTransit's Entity Framework integration adds `InboxState`, `OutboxMessage`,
+and `OutboxState` to the same PostgreSQL database. These tables provide durable
+message delivery and consumer deduplication; they are infrastructure state, not
+DoughTracker domain entities.
 
 ### 7.2 Ledger data
 
@@ -311,7 +320,8 @@ exact DTOs belong to implementation design.
 - `POST /webhooks/plaid`
 
 The webhook endpoint does not use Firebase authentication. It verifies the
-provider signature, persists/coalesces a sync job, and returns promptly.
+provider signature, persists/coalesces a sync run and `SyncConnectionRequested`
+command through the transactional outbox, and returns promptly.
 
 ### Ledger
 
@@ -331,15 +341,31 @@ transaction APIs, not aggregate reports.
 The backend verifies the Firebase token once at the API boundary. Every module
 receives the verified UID and scopes its database work to that owner.
 
+### Message contracts
+
+- `SyncConnectionRequested` is a command sent to one Connections consumer.
+- `TransactionsChanged` is an event published after a synchronized batch is
+  committed. Insights and future Budgeting or Forecasting modules may subscribe
+  without changing Connections.
+- Contracts contain stable identifiers and change metadata, never Plaid access
+  tokens or complete financial descriptions.
+
+Commands express intent and have one logical consumer. Events state a completed
+fact and may have zero or more consumers. Contract changes are additive whenever
+possible.
+
 ## 9. Synchronization flow
 
 ```mermaid
 sequenceDiagram
     actor User
     participant Web
-    participant C as Connections
+    participant C as Connections API
     participant P as Plaid
     participant S as Secret store
+    participant O as MassTransit outbox
+    participant R as RabbitMQ
+    participant W as Sync consumer
     participant L as Ledger
     participant DB as PostgreSQL
 
@@ -350,30 +376,34 @@ sequenceDiagram
     Web->>C: Exchange public token
     C->>P: Exchange token
     C->>S: Store access token
-    C->>DB: Store secret reference, Item, and initial sync job
+    C->>DB: Commit Item, sync run, and SyncConnectionRequested
     C-->>Web: Connection accepted
+    O->>DB: Read committed outbox command
+    O->>R: Send command
+    R->>W: Deliver SyncConnectionRequested
 
     loop Until has_more is false
-        C->>P: transactions/sync from saved cursor
-        P-->>C: Added, modified, removed + next cursor
-        C->>L: Apply normalized changes in process
-        L->>DB: Upsert changes and preserve manual overrides
-        C->>DB: Save acknowledged cursor
+        W->>P: transactions/sync from saved cursor
+        P-->>W: Added, modified, removed + next cursor
     end
-    C->>DB: Save final sync status
+    W->>L: Apply normalized changes in process
+    L->>DB: Commit changes, cursor, status, and TransactionsChanged
+    O->>DB: Read committed outbox event
+    O->>R: Publish TransactionsChanged
 ```
 
 After initial synchronization, the `SYNC_UPDATES_AVAILABLE` webhook creates
-another durable sync job. The webhook is only a notification; the worker calls
+another sync run and outbox command in one PostgreSQL transaction. The webhook
+is only a notification; the MassTransit consumer still calls
 `/transactions/sync` with the saved cursor to retrieve added, modified, and
 removed records.
 
-Connections also schedules one coalesced reconciliation job per connected Item
+Connections also sends one coalesced reconciliation command per connected Item
 at startup and at most once per hour. This catches changes after missed
 webhooks or local downtime. Opening a dashboard or report reads the complete
 local history immediately; if the connection has not been checked within the
-hour, the request may enqueue the same non-blocking reconciliation job. It does
-not wait on Plaid.
+hour, the request may request the same non-blocking synchronization. It does not
+wait on Plaid.
 
 Calling `/transactions/sync` does not make Plaid contact the institution. Plaid
 normally checks institutions on its own schedule, typically one to four times
@@ -383,16 +413,21 @@ separate fee model and is excluded while the project has a $0 provider budget.
 
 ### Synchronization guarantees
 
-- Each page's records and cursor are committed atomically in PostgreSQL.
+- Synchronized records, the cursor, sync status, and outgoing event are
+  committed atomically in PostgreSQL.
 - A crash restarts from the last committed cursor.
 - Replayed pages are safe because transaction writes upsert on provider IDs.
 - Provider modifications update source fields but never clear a manual category.
 - Provider removals mark transactions removed so reports stop counting them.
 - Retries use bounded exponential backoff and respect provider rate-limit hints.
-- A permanently failed job remains visible for diagnosis instead of being
+- A permanently failed sync run remains visible for diagnosis instead of being
   silently discarded.
-- Webhook and scheduled triggers coalesce so they cannot start overlapping syncs
+- Webhook and scheduled commands coalesce so they cannot start overlapping syncs
   for the same connection.
+- RabbitMQ and MassTransit are at-least-once; inbox deduplication and idempotent
+  handlers make duplicate delivery safe.
+- If RabbitMQ is unavailable after the database commits, the outbox retains the
+  message and delivers it when the broker recovers.
 
 ## 10. Reporting rules
 
