@@ -50,6 +50,8 @@ The sign-in page appears before the workspace. Start the local mock authenticati
 service using the Firebase setup guide; the login workflow is the same as production.
 There is no development-only sign-in bypass.
 Authentication does not isolate the shared demo ledger by user.
+API requests nevertheless require a valid bearer token; the local request helper
+obtains a protected backend token for the signed-in mock UID.
 
 ## Design direction
 
@@ -78,8 +80,8 @@ contain the subset of Plaid fields used by the preview, not every optional field
 in Plaid's API. The provider inspection endpoint emits snake_case field names:
 
 ```sh
-curl http://localhost:5083/api/demo/provider/amex
-curl 'http://localhost:5083/api/demo/provider/amex?update=true'
+curl http://localhost:5083/api/demo/provider/amex -H 'Authorization: Bearer YOUR_LOCAL_API_TOKEN'
+curl 'http://localhost:5083/api/demo/provider/amex?update=true' -H 'Authorization: Bearer YOUR_LOCAL_API_TOKEN'
 ```
 
 | Provider input                            | Normalized ledger / UI                                                                                  |
@@ -150,7 +152,7 @@ disconnect/reconnect, and differing month lengths. Browser checks exercise the
 actual UI and HTTP flows in both themes.
 
 Next, replace the shared in-memory demo ledger with persistent, owner-scoped
-Ledger and Insights use cases; add Firebase authorization; then integrate Plaid
+Ledger and Insights use cases with verified-UID ownership checks; then integrate Plaid
 Sandbox Link, cursor pagination, webhook ingestion, and connection errors using
 the existing architecture handoff. The fixture normalizer is for this USD demo,
 not a complete production ingestion/transfer-matching algorithm. These demo

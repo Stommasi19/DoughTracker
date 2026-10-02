@@ -1,8 +1,35 @@
 using Application;
 using Infrastructure;
+using System.Net;
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
+using System.Text.Json;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
 
 public class DemoLedgerTests
 {
+    [Fact]
+    public async Task MockWorkspaceRegistrationIsSingletonAndEndpointsRequireAuthentication()
+    {
+        using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+            builder.UseEnvironment("Development"));
+        using var client = factory.CreateClient();
+        var workspace = factory.Services.GetRequiredService<DemoWorkspace>();
+        Assert.Same(workspace, factory.Services.GetRequiredService<DemoWorkspace>());
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/demo/workspace")).StatusCode);
+
+        var response = await client.PostAsJsonAsync("/api/v1/dev/token", new { uid = "ledger-user" });
+        response.EnsureSuccessStatusCode();
+        var token = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("idToken").GetString()!;
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/demo/workspace")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync("/api/demo/connections",
+            new { institutionId = "capital-one" })).StatusCode);
+        Assert.Equal(4, workspace.Snapshot("2026-09").Accounts.Length);
+    }
+
     [Fact]
     public void Provider_data_reports_and_connection_lifecycle_agree()
     {

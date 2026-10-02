@@ -1,21 +1,27 @@
 using System.Globalization;
+using System.Security.Claims;
 using System.Text.Json;
 using Application;
 using Infrastructure;
+using Microsoft.AspNetCore.DataProtection;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddOpenApi();
+builder.Services.AddInfrastructure(builder.Configuration, builder.Environment);
 if (builder.Environment.IsDevelopment())
-    builder.Services.AddSingleton(new DemoWorkspace(PlaidDemoData.Seed()));
+    builder.Services.AddMockInfrastructure();
 
 var app = builder.Build();
+app.Services.InitializeInfrastructure();
+app.UseAuthentication();
+app.UseAuthorization();
 
 if (app.Environment.IsDevelopment())
 {
-    app.MapOpenApi();
+    app.MapOpenApi().AllowAnonymous();
 
-    var demo = app.MapGroup("/api/demo");
+    var demo = app.MapGroup("/api/demo").RequireAuthorization();
     demo.MapGet("/workspace", (DemoWorkspace workspace, string? month, string? accountId,
         string? categoryId, string? search) => {
         month ??= workspace.Seed.AsOf.ToString("yyyy-MM");
@@ -52,10 +58,39 @@ if (app.Environment.IsDevelopment())
     });
 }
 
-app.MapGet("/health", () => Results.Ok(new { status = "healthy" }));
+app.MapGet("/health", () => Results.Ok(new { status = "healthy" })).AllowAnonymous();
+
+var api = app.MapGroup("/api/v1").RequireAuthorization();
+api.MapGet("/me", (ClaimsPrincipal user) => Results.Ok(new
+{
+    uid = user.FindFirstValue(ClaimTypes.NameIdentifier),
+}));
+
+if (builder.Configuration.GetValue<bool>("Firebase:UseMockAuthentication"))
+{
+    api.MapPost("/dev/token", (MockTokenRequest request, ITimeLimitedDataProtector tokens, HttpResponse response) =>
+    {
+        if (string.IsNullOrWhiteSpace(request.Uid) || request.Uid.Length > 128)
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                ["uid"] = ["Provide a non-empty UID of at most 128 characters."],
+            });
+        }
+
+        response.Headers.CacheControl = "no-store";
+        return Results.Ok(new
+        {
+            idToken = tokens.Protect(request.Uid, TimeSpan.FromHours(1)),
+            tokenType = "Bearer",
+            expiresIn = 3600,
+        });
+    }).AllowAnonymous();
+}
 
 app.Run();
 
 public partial class Program;
 public record ConnectRequest(string InstitutionId);
 public record CategoryRequest(string? CategoryId);
+public sealed record MockTokenRequest(string? Uid);

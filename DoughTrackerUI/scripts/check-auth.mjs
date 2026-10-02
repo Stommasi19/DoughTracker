@@ -34,10 +34,28 @@ try {
   await signInWithEmailAndPassword(auth, email, password);
   assert.equal(auth.currentUser?.uid, uid);
   assert.ok(await auth.currentUser.getIdToken());
+  const api = "http://127.0.0.1:5083";
+  assert.equal((await fetch(`${api}/api/demo/workspace`)).status, 401);
+  const response = await fetch(`${api}/api/v1/dev/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ uid }),
+  });
+  assert.equal(response.status, 200);
+  const { idToken } = await response.json();
+  assert.equal(typeof idToken, "string");
+  const headers = { Authorization: `Bearer ${idToken}` };
+  const me = await fetch(`${api}/api/v1/me`, { headers });
+  assert.equal(me.status, 200);
+  assert.equal((await me.json()).uid, uid);
+  assert.equal(
+    (await fetch(`${api}/api/demo/workspace`, { headers })).status,
+    200,
+  );
   await deleteUser(auth.currentUser);
   assert.equal(auth.currentUser, null);
   console.log(
-    "Local Firebase check passed: create, sign out, reject bad credentials, reset, sign in, ID token.",
+    "Local authentication check passed: sign-in lifecycle, ID token, protected API handoff, workspace authentication.",
   );
 } finally {
   await deleteApp(app);

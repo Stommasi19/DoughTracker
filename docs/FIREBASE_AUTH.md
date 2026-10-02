@@ -13,6 +13,13 @@ the mock identity service. Production points the same SDK at Firebase. Account
 creation, credential validation, password reset, session restoration, and
 sign-out use the same code. There is no login bypass or separate demo UI.
 
+API requests always carry a bearer token. Locally, the request helper obtains a
+backend-protected token from `/api/v1/dev/token` for the signed-in mock user's
+UID. In real Firebase mode it sends the SDK's current Firebase ID token directly.
+The backend rejects missing or invalid tokens in both modes; the local token
+issuer is never available in production. The backend does not accept unsigned
+Authentication-emulator JWTs.
+
 From the worktree root, run the installed Firebase CLI:
 
 ```sh
@@ -44,7 +51,8 @@ project or credentials are needed. All workspace access goes through sign-in;
 entering the report URL directly does not skip authentication. The SDK's own
 emulator warning remains visible locally to prevent use of real credentials.
 
-To run the minimal SDK regression check while the emulator is running:
+To run the SDK/API regression check with both the emulator and .NET Development
+API (port 5083, mock authentication enabled) running:
 
 ```sh
 cd DoughTrackerUI
@@ -52,7 +60,8 @@ npm run test:auth
 ```
 
 It creates and deletes its own isolated test account, checks rejected credentials,
-sign-out/sign-in, reset-email delivery to the emulator, and ID-token issuance.
+sign-out/sign-in, reset-email delivery to the emulator, ID-token issuance,
+backend token handoff, verified UID, and protected workspace access.
 The check never reads cloud configuration or uses a live Firebase project.
 
 ## Connect a real Firebase project
@@ -68,6 +77,10 @@ The check never reads cloud configuration or uses a live Firebase project.
    `VITE_FIREBASE_AUTH_EMULATOR=false` for cloud-backed development and builds.
 5. Run `npm run dev:firebase` for cloud-backed development, or inject the same public
    values into the deployment build environment and run `npm run build`.
+6. Configure the backend for the same project with
+   `Firebase__UseMockAuthentication=false`, `Firebase__ProjectId`, and
+   `GOOGLE_APPLICATION_CREDENTIALS` pointing to service-account JSON outside the
+   repository. See [backend setup](../README.md#backend-authentication).
 
 Vite embeds `VITE_` values into the browser bundle. Firebase web configuration is
 public project identification, **not a secret or authorization boundary**.
@@ -81,26 +94,32 @@ Production builds cannot enable the mock authentication service. Missing
 configuration (or an emulator flag mistakenly set to true) leaves sign-in
 unavailable instead of opening the dashboard. The UI waits for Firebase's initial
 auth-state callback before rendering the workspace, locally and in production.
-Signing out unmounts the
-workspace and clears its client state; changing Firebase UID remounts it.
+Signing out unmounts the workspace and clears its client state; changing Firebase
+UID remounts it. Token handoff aborts if the signed-in UID changes during a request.
+
+Backend registrations and construction live in
+`Infrastructure/DependencyInjection.cs`: `AddInfrastructure` owns authentication
+configuration, token protection, Firebase Admin construction, and lifetimes;
+`AddMockInfrastructure` builds the seeded singleton workspace. Startup calls
+`InitializeInfrastructure` to fail early if real Firebase credentials are missing.
+`API/Program.cs` selects the registrations and owns HTTP routes and middleware.
 
 ## Security boundary and next production step
 
-This is a **frontend authentication foundation, not a production-ready financial
-backend**. The `/api/demo` routes remain development-only, anonymous, shared
-in-memory fixtures. Signing in does not make those fixtures private. The UI labels
-them as demo data. In Production the .NET API does not expose these routes.
+The backend verifies real Firebase ID tokens and has regression checks for
+signature, issuer, project, expiry, and mock-token rejection. This is still
+**not a production-ready financial backend**: `/api/demo` routes are
+development-only, authenticated, shared in-memory fixtures. Signing in does not
+isolate them by owner. The UI labels them as demo data. In Production neither
+these routes nor the mock workspace registration exists.
 
 Before replacing fixtures with real financial data:
 
-1. Have the client attach a fresh Firebase ID token to real API requests.
-2. Verify signature, issuer, audience, expiration, and subject at the .NET API
-   boundary; reject missing/invalid tokens. Never trust a UID supplied by the UI.
-3. Scope every persistent read/write to the verified UID and check account and
+1. Scope every persistent read/write to the verified UID and check account and
    connection ownership. Test cross-user access rejection.
-4. Verify email ownership where appropriate and define account deletion/session
+2. Verify email ownership where appropriate and define account deletion/session
    revocation behavior before inviting other users.
-5. Wire the authenticated dashboard to these owner-scoped endpoints, then verify
+3. Wire the authenticated dashboard to these owner-scoped endpoints, then verify
    Google OAuth and actual email delivery on the chosen production domain.
 
 No Firestore database, hosting deployment, analytics, billing, or cloud resources

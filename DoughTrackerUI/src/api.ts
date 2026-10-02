@@ -1,3 +1,5 @@
+import { apiToken } from "./firebase";
+
 export type Category = { id: string; name: string };
 export type Institution = { id: string; name: string; initials: string };
 export type Connection = {
@@ -70,9 +72,15 @@ export async function request<T>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
+  const headers = new Headers(options.headers);
+  headers.set("Content-Type", "application/json");
+  headers.set(
+    "Authorization",
+    `Bearer ${await apiToken(options.signal ?? undefined)}`,
+  );
   const response = await fetch(`/api/demo${path}`, {
     ...options,
-    headers: { "Content-Type": "application/json", ...options.headers },
+    headers,
   });
   if (!response.ok) {
     const detail = await response.json().catch(() => null);

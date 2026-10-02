@@ -1,6 +1,22 @@
-@API_HostAddress = http://localhost:5083
+# Docker uses 5084; use 5083 for dotnet run.
+@API_HostAddress = http://localhost:5084
+@ID_Token = paste-idToken-from-development-token-response
 
 GET {{API_HostAddress}}/health
 Accept: application/json
 
 ###
+
+# Development only; no Firebase configuration is required.
+POST {{API_HostAddress}}/api/v1/dev/token
+Content-Type: application/json
+
+{
+  "uid": "local-user"
+}
+
+###
+
+GET {{API_HostAddress}}/api/v1/me
+Authorization: Bearer {{ID_Token}}
+Accept: application/json

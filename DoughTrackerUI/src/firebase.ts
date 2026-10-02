@@ -46,6 +46,36 @@ try {
     : "Sign-in is unavailable. Please contact the workspace owner.";
 }
 
+export async function apiToken(signal?: AbortSignal): Promise<string> {
+  const user = auth?.currentUser;
+  if (!user) throw new Error("Sign in before opening your workspace.");
+  let token: string;
+  if (usesAuthEmulator) {
+    // ponytail: mint a local token per request; cache by UID/expiry if local traffic warrants it.
+    const response = await fetch("/api/v1/dev/token", {
+      method: "POST",
+      signal,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ uid: user.uid }),
+    });
+    if (!response.ok)
+      throw new Error(
+        "Could not establish your API session. Check the backend authentication configuration.",
+      );
+    const body: { idToken?: unknown } = await response.json();
+    if (typeof body?.idToken !== "string" || !body.idToken)
+      throw new Error(
+        "The authentication service returned an invalid session.",
+      );
+    token = body.idToken;
+  } else {
+    token = await user.getIdToken();
+  }
+  if (auth?.currentUser?.uid !== user.uid)
+    throw new Error("Your session changed. Sign in again to continue.");
+  return token;
+}
+
 export function authErrorMessage(error: unknown): string {
   if (!(error instanceof FirebaseError))
     return "We couldn’t complete that request. Please try again.";
