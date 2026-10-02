@@ -51,6 +51,7 @@ export type SpendingGroup = {
   count: number;
 };
 type WorkspaceMetadata = {
+  connectableInstitutions: Institution[];
   defaultMonth: string;
   defaultCurrency: string;
   months: string[];

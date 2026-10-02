@@ -42,7 +42,7 @@ The theme preference is stored in this browser.
 | Report summary    | Net posted spending, previous-month comparison, daily average, purchase count, pending spending                                |
 | Report analysis   | Cumulative spending comparison, category bars, latest activity, top merchants, six-month history                               |
 | Transactions      | Month/account/category filters, merchant/description search, server pagination, transaction details, manual category override or reset |
-| Accounts          | Institution status, last successful sync, last-known account balances, stored connection status; bank actions deferred to milestone 2      |
+| Accounts          | Connect a mock bank in Development; institution status, last successful sync, last-known balances, and stored connection status. Real bank linking remains milestone 2. |
 
 Navigation uses browser hashes and supports back/forward without a routing
 dependency. Desktop is the design target (1024px and wider); smaller/zoomed
@@ -160,7 +160,9 @@ actual UI and HTTP flows in both themes.
 Milestone 1 now uses `/api/v1` accounts, categories, paginated transactions,
 category overrides, spending charts, and summaries backed by PostgreSQL.
 The report calculator is shared with the preview fixture regression check.
-The UI separates currencies and no longer exposes fixture connection mutations.
+The UI separates currencies. Development mock connection controls use the
+owner-scoped persistent `/api/v1/connections` endpoint, with available banks from
+`/api/v1/workspace`; they do not mutate the legacy shared fixture workspace.
 Milestone 2 integrates Plaid Sandbox Link, cursor pagination, webhook ingestion,
 and recoverable connection failures. The fixture normalizer remains a USD demo,
 not a complete production ingestion/transfer-matching algorithm. Demo routes must

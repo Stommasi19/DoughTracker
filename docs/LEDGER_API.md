@@ -95,6 +95,7 @@ DTOs or accepted as a write parameter.
 | Method and route | Response/behavior |
 |---|---|
 | `GET /api/v1/workspace` | Owner-scoped `defaultMonth`, `defaultCurrency`, available `months`/`currencies`, latest visible transaction date `asOf` (nullable), and `seeded` flag from stored account providers. |
+| `POST /api/v1/connections` | Development only: `{ "institutionId": "capital-one" }`; connect a catalog mock institution and persist its sample accounts/history for the authenticated owner. Returns `{ connectionId }`. |
 | `GET /api/v1/accounts` | `{ items: [...] }`; owned active accounts, nullable balances, currency, provider/institution, connection status, last-sync/error metadata. |
 | `GET /api/v1/categories` | `{ items: [{ id, name }] }`; the fixed category lookup. |
 | `GET /api/v1/transactions` | `{ items, page, pageSize, totalCount }`; normalized owned rows, excluding removed transactions and deleted accounts. Pending rows remain visible. |
@@ -124,6 +125,15 @@ come from active accounts and visible transactions; USD is preferred if present,
 otherwise the first currency, with USD as the server's empty-workspace default.
 Report dates, comparison dates, and chart series come directly from report
 responses. Empty history has no fabricated freshness date.
+
+In Development, `/workspace` also returns `connectableInstitutions` from the
+backend fixture catalog. On **Accounts**, choose a bank and select **Connect
+account** to import its sample data into the signed-in user's persistent ledger.
+This works for newly registered users as well as seeded identities. Imports are
+atomic; repeated connections retain existing rows, removed/deleted markers,
+balances, and category overrides. Reconnection restores connection status.
+Production returns an empty catalog and has no mock connection write endpoint.
+Real Plaid Link, disconnect, and synchronization remain milestone 2.
 
 Malformed filters/body or unknown categories return 400. Unknown and foreign
 account/transaction IDs both return 404 without disclosing another owner's data.
@@ -224,9 +234,17 @@ Evidence recorded on 2026-10-02:
   pagination from 20 to 22, stored brokerage subtype and attention-required status;
   removing that test ledger restores the current UTC month and empty-history label.
   Temporary rows were removed; the development ledger retains its 350 fixture rows.
+- Mock connection follow-up: all eight backend checks pass, covering authenticated
+  owned imports, invalid institutions, repeat/reconnect without duplicate rows or
+  overwritten categories, removed-row retention, restart persistence, and absence
+  of the write endpoint in Production. Frontend build/lint and auth checks pass.
+  Browser verification connects Capital One from an empty workspace, shows the
+  stored account/balances and spending, and retains the connection after reload.
+  The temporary test user's import was removed; Alice and Bob remain unchanged.
 
 Live Firebase project sign-in and real Plaid synchronization remain pending.
-No cloud resources or bank connections were created. The legacy Development-only
+No cloud resources or real bank connections were created. The legacy Development-only
 `/api/demo` fixtures remain separate from the persistent ledger; the dashboard
-does not call them. Bank connect/disconnect/sync controls are deferred to
-milestone 2, and full frontend Compose startup wiring remains B12.
+does not call them. Development mock connections now write to the owned ledger;
+real bank linking, disconnect, and sync remain milestone 2. Full frontend Compose
+startup wiring remains B12.

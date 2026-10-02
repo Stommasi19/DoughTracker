@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using Application;
 using Domain;
 using Microsoft.EntityFrameworkCore;
 
@@ -9,11 +10,26 @@ public static class DevelopmentSeed
 {
     private static Guid Id(string owner, string key) => new(SHA256.HashData(Encoding.UTF8.GetBytes(owner + ":" + key)).AsSpan(0, 16));
 
-    public static async Task Apply(LedgerDbContext db, string[] owners, CancellationToken ct = default)
+    public static Task Apply(LedgerDbContext db, string[] owners, CancellationToken ct = default)
     {
         if (owners.Length != 2 || owners.Distinct().Count() != 2 || owners.Any(o => string.IsNullOrWhiteSpace(o) || o.Length > 128))
             throw new InvalidOperationException("Configure two distinct DevelopmentSeed:Owners UIDs of at most 128 characters.");
+        return Import(db, owners, null, ct);
+    }
+
+    public static async Task<Guid> Connect(LedgerDbContext db, string owner, string? institutionId, CancellationToken ct)
+    {
+        if (!PlaidDemoData.Institutions.Any(i => i.Id == institutionId))
+            throw new LedgerRequestException("Choose an available mock institution.");
+        await Import(db, [owner], institutionId, ct);
+        return Id(owner, "connection:" + institutionId);
+    }
+
+    private static async Task Import(LedgerDbContext db, string[] owners, string? institutionId, CancellationToken ct)
+    {
         var seed = PlaidDemoData.Seed();
+        var institutions = seed.Institutions.Where(i => institutionId is null ? i.InitiallyConnected : i.Id == institutionId)
+            .Select(i => i.Id).ToHashSet();
         var stamp = new DateTimeOffset(seed.AsOf.ToDateTime(new TimeOnly(17, 42)), TimeSpan.Zero);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         for (var index = 0; index < owners.Length; index++)
@@ -22,7 +38,7 @@ public static class DevelopmentSeed
             var connectionIds = await db.Connections.Where(c => c.OwnerId == owner).Select(c => c.Id).ToListAsync(ct);
             var accountIds = await db.Accounts.Where(a => a.OwnerId == owner).Select(a => a.Id).ToListAsync(ct);
             var transactionIds = (await db.Transactions.Where(t => t.OwnerId == owner).Select(t => t.Id).ToListAsync(ct)).ToHashSet();
-            foreach (var institution in seed.Institutions.Where(i => i.InitiallyConnected))
+            foreach (var institution in seed.Institutions.Where(i => institutions.Contains(i.Id)))
             {
                 var id = Id(owner, "connection:" + institution.Id);
                 if (!connectionIds.Contains(id)) db.Connections.Add(new FinancialConnection {
@@ -31,7 +47,7 @@ public static class DevelopmentSeed
                     LastSyncAt = stamp, CreatedAt = stamp, UpdatedAt = stamp
                 });
             }
-            foreach (var account in seed.Accounts.Where(a => seed.Institutions.Any(i => i.Id == a.InstitutionId && i.InitiallyConnected)))
+            foreach (var account in seed.Accounts.Where(a => institutions.Contains(a.InstitutionId)))
             {
                 var id = Id(owner, "account:" + account.Id);
                 if (!accountIds.Contains(id)) db.Accounts.Add(new Account {
@@ -42,7 +58,7 @@ public static class DevelopmentSeed
                 });
             }
             var deletedId = Id(owner, "account:deleted");
-            if (!accountIds.Contains(deletedId)) db.Accounts.Add(new Account {
+            if (institutionId is null && !accountIds.Contains(deletedId)) db.Accounts.Add(new Account {
                 Id = deletedId, OwnerId = owner, ConnectionId = Id(owner, "connection:chase"),
                 ProviderAccountId = "deleted", Name = "Deleted fixture account", Type = "depository", Subtype = "checking", DeletedAt = stamp
             });
@@ -62,7 +78,14 @@ public static class DevelopmentSeed
                 });
             }
             foreach (var row in seed.Transactions.Where(t => seed.Accounts.Any(a => a.Id == t.AccountId &&
-                seed.Institutions.Any(i => i.Id == a.InstitutionId && i.InitiallyConnected)))) Add(row);
+                institutions.Contains(a.InstitutionId)))) Add(row);
+            if (institutionId is not null)
+            {
+                await db.Connections.Where(c => c.OwnerId == owner && c.Id == Id(owner, "connection:" + institutionId))
+                    .ExecuteUpdateAsync(s => s.SetProperty(c => c.Status, "connected")
+                        .SetProperty(c => c.LastErrorCode, (string?)null).SetProperty(c => c.UpdatedAt, DateTimeOffset.UtcNow), ct);
+                continue;
+            }
             var extra = seed.Transactions.First(t => t.Classification == "expense") with {
                 Date = seed.AsOf, AuthorizedDate = null, MerchantName = "Precision Market", Description = "Literal 100%_test\\purchase", Pending = false
             };

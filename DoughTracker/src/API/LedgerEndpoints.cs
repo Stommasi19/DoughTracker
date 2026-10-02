@@ -18,7 +18,9 @@ public static class LedgerEndpoints
             .AllowAnonymous().WithTags("Health").Produces(200).ProducesProblem(503);
         var api = app.MapGroup("/api/v1").RequireAuthorization().WithTags("Ledger");
         api.MapGet("/workspace", async (LedgerQueries ledger, ClaimsPrincipal user, CancellationToken ct) =>
-            Results.Ok(await ledger.Workspace(Owner(user), ct)))
+            Results.Ok((await ledger.Workspace(Owner(user), ct)) with {
+                ConnectableInstitutions = app.Environment.IsDevelopment() ? PlaidDemoData.Institutions : []
+            }))
             .Produces<WorkspaceMetadata>().ProducesProblem(503)
             .WithDescription("Defaults and available periods/currencies from the owner's active ledger. Default month is the latest transaction month, or current UTC month for empty history. USD is preferred when present; otherwise the first stored currency, with USD for an empty workspace. AsOf is the latest visible transaction date, null for empty history. Periods include the current UTC month.");
         api.MapGet("/accounts", async (LedgerQueries ledger, ClaimsPrincipal user, CancellationToken ct) =>
@@ -27,6 +29,12 @@ public static class LedgerEndpoints
         api.MapGet("/categories", async (LedgerQueries ledger, CancellationToken ct) =>
             Results.Ok(new ItemsResult<DemoCategory>(await ledger.Categories(ct))))
             .Produces<ItemsResult<DemoCategory>>().ProducesProblem(503);
+        if (app.Environment.IsDevelopment())
+            api.MapPost("/connections", async (ConnectRequest request, LedgerDbContext db, ClaimsPrincipal user, CancellationToken ct) => {
+                var id = await DevelopmentSeed.Connect(db, Owner(user), request.InstitutionId, ct);
+                return Results.Ok(new { connectionId = id });
+            }).Produces(200).ProducesProblem(400).ProducesProblem(503)
+                .WithDescription("Development only. Connect a mock institution and persist its sample accounts/history for the authenticated owner. Repeating a connection preserves existing rows and overrides. No real bank credentials or network calls.");
         api.MapGet("/transactions", async (LedgerQueries ledger, ClaimsPrincipal user, CancellationToken ct,
             string? month, string? dateFrom, string? dateTo, string? accountId, string? categoryId,
             string? currency, string? search, int page = 1, int pageSize = 20) => {

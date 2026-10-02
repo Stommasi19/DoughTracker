@@ -91,6 +91,7 @@ public class PersistentLedgerTests
         using var anonymous = factory.CreateClient();
         foreach (var endpoint in new[] { "/workspace", "/accounts", "/transactions", "/categories", "/reports/summary", "/reports/spending" })
             Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync("/api/v1" + endpoint)).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.PostAsJsonAsync("/api/v1/connections", new { institutionId = "capital-one" })).StatusCode);
 
         var accounts = (await Read(alice, "/api/v1/accounts")).GetProperty("items");
         var bobAccounts = (await Read(bob, "/api/v1/accounts")).GetProperty("items");
@@ -206,6 +207,35 @@ public class PersistentLedgerTests
         Assert.Equal(new[] { DateTime.UtcNow.ToString("yyyy-MM"), "2024-02", "2023-11" },
             otherWorkspace.GetProperty("months").EnumerateArray().Select(m => m.GetString()));
         Assert.False(otherWorkspace.GetProperty("seeded").GetBoolean());
+
+        using var connector = await Client(factory, "connector");
+        Assert.Equal(3, (await Read(connector, "/api/v1/workspace")).GetProperty("connectableInstitutions").GetArrayLength());
+        foreach (var institution in new string?[] { null, "", "unknown" })
+            Assert.Equal(HttpStatusCode.BadRequest, (await connector.PostAsJsonAsync("/api/v1/connections", new { institutionId = institution })).StatusCode);
+        var connected = await connector.PostAsJsonAsync("/api/v1/connections", new { institutionId = "capital-one", ownerId = "bob" });
+        connected.EnsureSuccessStatusCode();
+        var connectionId = (await connected.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("connectionId").GetGuid();
+        var connectedAccounts = (await Read(connector, "/api/v1/accounts")).GetProperty("items");
+        Assert.Single(connectedAccounts.EnumerateArray());
+        Assert.Equal("360 checking", connectedAccounts[0].GetProperty("name").GetString());
+        Assert.Equal(3, (await Read(bob, "/api/v1/accounts")).GetProperty("items").GetArrayLength());
+        var imported = await Read(connector, "/api/v1/transactions?pageSize=100");
+        Assert.True(imported.GetProperty("totalCount").GetInt32() > 0);
+        var importedId = imported.GetProperty("items")[0].GetProperty("id").GetGuid();
+        (await connector.PatchAsJsonAsync($"/api/v1/transactions/{importedId}/category", new { categoryId = "health" })).EnsureSuccessStatusCode();
+        await db.Connections.Where(c => c.Id == connectionId).ExecuteUpdateAsync(s => s.SetProperty(c => c.Status, "disconnected"));
+        (await connector.PostAsJsonAsync("/api/v1/connections", new { institutionId = "capital-one" })).EnsureSuccessStatusCode();
+        Assert.Equal(imported.GetProperty("totalCount").GetInt32(), (await Read(connector, "/api/v1/transactions")).GetProperty("totalCount").GetInt32());
+        Assert.Equal("connected", (await Read(connector, "/api/v1/accounts")).GetProperty("items")[0].GetProperty("connectionStatus").GetString());
+        using (var restarted = Factory(connection))
+        using (var restartedConnector = await Client(restarted, "connector"))
+        {
+            var rows = (await Read(restartedConnector, "/api/v1/transactions?pageSize=100")).GetProperty("items");
+            Assert.Contains(rows.EnumerateArray(), row => row.GetProperty("id").GetGuid() == importedId && row.GetProperty("manualCategoryId").GetString() == "health");
+        }
+        await db.Transactions.Where(t => t.Id == importedId).ExecuteUpdateAsync(s => s.SetProperty(t => t.RemovedAt, DateTimeOffset.UtcNow));
+        (await connector.PostAsJsonAsync("/api/v1/connections", new { institutionId = "capital-one" })).EnsureSuccessStatusCode();
+        Assert.Equal(imported.GetProperty("totalCount").GetInt32() - 1, (await Read(connector, "/api/v1/transactions")).GetProperty("totalCount").GetInt32());
 
         // PostgreSQL, not just application filters, rejects cross-owner references.
         db.ChangeTracker.Clear();

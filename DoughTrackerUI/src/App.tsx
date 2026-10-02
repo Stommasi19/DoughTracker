@@ -44,6 +44,7 @@ function App({
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [currency, setCurrency] = useState("");
+  const [institutionId, setInstitutionId] = useState("");
   const [selectedTransaction, setSelectedTransaction] =
     useState<Transaction | null>(null);
   const [editingCategory, setEditingCategory] = useState("");
@@ -181,6 +182,9 @@ function App({
         ? "The details behind your spending."
         : "Your accounts, together in one place.";
   const report = data?.report;
+  const availableInstitutions = data?.connectableInstitutions.filter(institution =>
+    !data.connections.some(connection => connection.institutionId === institution.id && connection.status === "connected")) ?? [];
+  const selectedInstitution = availableInstitutions.find(institution => institution.id === institutionId) ?? availableInstitutions[0];
   const priorMonthName = report && new Date(`${report.previousDateFrom}T12:00:00`).toLocaleDateString("en-US", {
     month: "long",
   });
@@ -642,6 +646,31 @@ function App({
               )}
               {page === "accounts" && (
                 <>
+                  {data.connectableInstitutions.length > 0 && (
+                    <section className="panel connect-panel" aria-label="Connect an account">
+                      <div className="section-heading">
+                        <div>
+                          <h2>Connect an account</h2>
+                          <p>Choose a mock bank to add sample accounts and transactions.</p>
+                        </div>
+                      </div>
+                      <form onSubmit={async event => {
+                        event.preventDefault();
+                        if (selectedInstitution) await mutate("/connections", { institutionId: selectedInstitution.id }, `${selectedInstitution.name} connected. Sample history added to your ledger.`);
+                      }}>
+                        <label>
+                          <span>Bank</span>
+                          <select value={selectedInstitution?.id ?? ""} onChange={event => setInstitutionId(event.target.value)} disabled={busy || loading || !availableInstitutions.length}>
+                            {!availableInstitutions.length && <option value="">All mock banks connected</option>}
+                            {availableInstitutions.map(institution => <option key={institution.id} value={institution.id}>{institution.name}</option>)}
+                          </select>
+                        </label>
+                        <button type="submit" className="button primary" disabled={busy || loading || !selectedInstitution}>
+                          <Icon name="plus" size={17} /> {busy ? "Connecting…" : "Connect account"}
+                        </button>
+                      </form>
+                    </section>
+                  )}
                   <div className="accounts-heading">
                     <span>
                       {data.accounts.length} accounts across{" "}
@@ -738,7 +767,7 @@ function App({
                       <h3>Your account history</h3>
                       <p>
                         Account balances and imported history are stored in your
-                        personal ledger. Bank connection tools are coming next.
+                        personal ledger. {data.connectableInstitutions.length ? "Mock connections use sample bank data. Real bank linking is coming next." : "Bank connection tools are coming next."}
                       </p>
                     </div>
                   </div>
