@@ -9,6 +9,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test:auth": "node scripts/check-auth.mjs",
+    "test:plaid": "node scripts/check-plaid.mjs",
     "seed:users": "node scripts/seed-local-users.mjs",
     "dev:firebase": "vite"
   },

@@ -1,6 +1,7 @@
 using Application;
 using Domain;
 using Microsoft.EntityFrameworkCore;
+using MassTransit;
 
 namespace Infrastructure;
 
@@ -10,9 +11,18 @@ public class LedgerDbContext(DbContextOptions<LedgerDbContext> options) : DbCont
     public DbSet<Account> Accounts => Set<Account>();
     public DbSet<Transaction> Transactions => Set<Transaction>();
     public DbSet<Category> Categories => Set<Category>();
+    public DbSet<SyncRun> SyncRuns => Set<SyncRun>();
 
     protected override void OnModelCreating(ModelBuilder model)
     {
+        model.AddInboxStateEntity();
+        model.AddOutboxMessageEntity();
+        model.AddOutboxStateEntity();
+        var run = model.Entity<SyncRun>();
+        run.ToTable("sync_runs");
+        run.HasKey(r => r.Id);
+        run.HasOne<FinancialConnection>().WithMany().HasForeignKey(r => r.ConnectionId).OnDelete(DeleteBehavior.Restrict);
+        run.HasIndex(r => r.ConnectionId).IsUnique().HasFilter("\"Status\" IN ('requested', 'processing')");
         var connection = model.Entity<FinancialConnection>();
         connection.ToTable("financial_connections");
         connection.HasKey(c => c.Id);

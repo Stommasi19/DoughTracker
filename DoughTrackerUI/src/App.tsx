@@ -15,6 +15,8 @@ import {
   TransactionTable,
 } from "./components";
 import "./App.css";
+import { openLink } from "./plaid";
+import { auth } from "./firebase";
 
 type Page = "expense-report" | "transactions" | "accounts";
 const currentPage = (): Page =>
@@ -50,6 +52,7 @@ function App({
   const [editingCategory, setEditingCategory] = useState("");
   const currentRequest = useRef("");
   const dialog = useRef<HTMLDialogElement>(null);
+  const linkAbort = useRef<AbortController | null>(null);
   const hasFilters = Boolean(
     accountId || categoryId || (currency && currency !== data?.defaultCurrency) || (page === "transactions" && search),
   );
@@ -102,6 +105,57 @@ function App({
     if (selectedTransaction && dialog.current && !dialog.current.open)
       dialog.current.showModal();
   }, [selectedTransaction]);
+  useEffect(() => () => linkAbort.current?.abort(), []);
+  const syncing = data?.connections.some(c => c.syncStatus === "requested" || c.syncStatus === "processing") ?? false;
+  useEffect(() => {
+    if (!syncing) return;
+    // ponytail: poll while work is pending; use push updates if many simultaneous dashboards need them.
+    const timer = window.setInterval(() => setRefresh(value => value + 1), 3000);
+    return () => window.clearInterval(timer);
+  }, [syncing]);
+  useEffect(() => {
+    if (new URL(location.href).searchParams.has("oauth_state_id")) location.hash = "accounts";
+  }, []);
+
+  async function connectBank(connectionId?: string) {
+    linkAbort.current?.abort();
+    const controller = new AbortController();
+    linkAbort.current = controller;
+    setBusy(true); setError("");
+    try {
+      const redirect = new URL(location.href).searchParams.has("oauth_state_id");
+      const saved = sessionStorage.getItem("doughtracker-link");
+      const owner = auth?.currentUser?.uid;
+      const stored = saved ? JSON.parse(saved) as { owner: string; token: string; connectionId?: string; publicToken?: string } : null;
+      const pending = stored && stored.owner === owner && (redirect || stored.publicToken) ? stored : null;
+      if (redirect && stored && stored.owner !== owner) throw new Error("Sign in with the user who started this bank connection.");
+      connectionId = pending?.connectionId ?? connectionId;
+      const token = pending?.token ?? (await request<{ linkToken: string }>(
+        connectionId ? `/connections/${connectionId}/reconnect` : "/connections/link-token",
+        { method: "POST", signal: controller.signal },
+      )).linkToken;
+      sessionStorage.setItem("doughtracker-link", JSON.stringify({ owner, token, connectionId, publicToken: pending?.publicToken }));
+      const result = pending?.publicToken ? { publicToken: pending.publicToken } :
+        await openLink(token, controller.signal, redirect ? location.href : undefined);
+      if (result) {
+        // Update mode can complete without a public token; it retains the existing access token.
+        if (result.publicToken !== null || connectionId) {
+          if (!connectionId) sessionStorage.setItem("doughtracker-link", JSON.stringify({ owner, token, publicToken: result.publicToken }));
+          await request(connectionId ? `/connections/${connectionId}/reconnect/complete` : "/connections/exchange-token", {
+            method: "POST", signal: controller.signal,
+            ...(!connectionId ? { body: JSON.stringify({ publicToken: result.publicToken }) } : {}),
+          });
+          setMonth(""); setAccountId(""); setCurrency("");
+          setRefresh(value => value + 1);
+          setNotice("Bank linked. Your transaction history is syncing.");
+        }
+      }
+      sessionStorage.removeItem("doughtracker-link");
+      if (redirect) history.replaceState(null, "", location.pathname + "#accounts");
+    } catch (reason) {
+      if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "Bank connection failed.");
+    } finally { if (!controller.signal.aborted) setBusy(false); }
+  }
 
   async function mutate(
     path: string,
@@ -646,6 +700,12 @@ function App({
               )}
               {page === "accounts" && (
                 <>
+                  {data.plaidEnabled && <section className="panel connect-panel" aria-label="Connect a bank">
+                    <div className="section-heading"><div><h2>Connect a bank</h2><p>Securely link a Sandbox bank through Plaid.</p></div></div>
+                    <button className="button primary" disabled={busy || loading} onClick={() => void connectBank()}>
+                      <Icon name="plus" size={17} /> {busy ? "Connecting…" : new URL(location.href).searchParams.has("oauth_state_id") ? "Resume bank connection" : "Connect bank"}
+                    </button>
+                  </section>}
                   {data.connectableInstitutions.length > 0 && (
                     <section className="panel connect-panel" aria-label="Connect an account">
                       <div className="section-heading">
@@ -714,6 +774,16 @@ function App({
                             {connection.status.replaceAll("_", " ").replace(/^./, letter => letter.toUpperCase())}
                           </span>
                         </div>
+                        {(connection.syncStatus === "failed" || connection.syncStatus === "requested" || connection.syncStatus === "processing") && <p role="status">{connection.syncStatus === "failed" ? "Sync failed. Retry or reconnect your bank." :
+                          connection.syncStatus === "requested" || connection.syncStatus === "processing" ? "Syncing transaction history…" : ""}</p>}
+                        {connection.lastErrorCode && <p role="status">{connection.status === "disconnecting" ? "Disconnect needs another attempt to finish." : "Your bank connection needs attention."}</p>}
+                        <div className="connection-actions">
+                          {connection.status === "attention_required" && connection.provider === "plaid" && <button className="button" disabled={busy} onClick={() => void connectBank(connection.id)}>Reconnect</button>}
+                          {data.syncEnabled && connection.status !== "disconnected" && connection.status !== "disconnecting" && <button className="button" disabled={busy || syncing} onClick={() => void mutate(`/connections/${connection.id}/sync`, undefined, "Sync requested.")}>Sync</button>}
+                          {connection.status !== "disconnected" && <button className="button" disabled={busy} onClick={() => {
+                            if (window.confirm("Disconnect this institution? Your account history will be retained.")) void mutate(`/connections/${connection.id}`, undefined, "Institution disconnected. History retained.", "DELETE");
+                          }}>{connection.status === "disconnecting" ? "Retry disconnect" : "Disconnect"}</button>}
+                        </div>
                         <div className="account-list">
                           {accounts.map((account) => (
                             <div className="account-row" key={account.id}>
@@ -740,6 +810,7 @@ function App({
                                       )}
                                 </strong>
                               </div>
+
                               <div>
                                 <span>
                                   {account.type === "credit"
@@ -755,6 +826,11 @@ function App({
                                       )}
                                 </strong>
                               </div>
+                              <button className="button" disabled={busy} aria-label={`Delete ${account.name}`} onClick={() => {
+                                if (window.confirm(`Delete ${account.name} and its transaction history? It will not be imported again.`)) {
+                                  setAccountId(""); void mutate(`/accounts/${account.id}`, undefined, "Account and its history deleted.", "DELETE");
+                                }
+                              }}>Delete</button>
                             </div>
                           ))}
                         </div>
@@ -767,7 +843,7 @@ function App({
                       <h3>Your account history</h3>
                       <p>
                         Account balances and imported history are stored in your
-                        personal ledger. {data.connectableInstitutions.length ? "Mock connections use sample bank data. Real bank linking is coming next." : "Bank connection tools are coming next."}
+                        personal ledger. Disconnecting a bank retains history; deleting an account removes its history and prevents future imports.
                       </p>
                     </div>
                   </div>

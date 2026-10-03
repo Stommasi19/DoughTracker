@@ -37,6 +37,7 @@ public static class DevelopmentSeed
             var owner = owners[index];
             var connectionIds = await db.Connections.Where(c => c.OwnerId == owner).Select(c => c.Id).ToListAsync(ct);
             var accountIds = await db.Accounts.Where(a => a.OwnerId == owner).Select(a => a.Id).ToListAsync(ct);
+            var tombstones = (await db.Accounts.Where(a => a.OwnerId == owner && a.DeletedAt != null).Select(a => a.Id).ToArrayAsync(ct)).ToHashSet();
             var transactionIds = (await db.Transactions.Where(t => t.OwnerId == owner).Select(t => t.Id).ToListAsync(ct)).ToHashSet();
             foreach (var institution in seed.Institutions.Where(i => institutions.Contains(i.Id)))
             {
@@ -64,6 +65,7 @@ public static class DevelopmentSeed
             });
             void Add(LedgerTransaction row, Guid? accountId = null)
             {
+                if (tombstones.Contains(accountId ?? Id(owner, "account:" + row.AccountId))) return;
                 var id = Id(owner, "transaction:" + row.Id);
                 if (transactionIds.Contains(id)) return;
                 db.Transactions.Add(new Transaction {

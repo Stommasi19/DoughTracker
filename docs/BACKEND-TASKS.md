@@ -1,8 +1,11 @@
 # Backend implementation tasks
 
 Milestone 1 working branch: `feat/milestone-1`
+Milestone 2 working branch: `feat/milestone-2`
 
 Implementation and verification: [LEDGER_API.md](LEDGER_API.md).
+Milestone 2 plan and evidence: [MILESTONE-2-PLAN.md](MILESTONE-2-PLAN.md),
+[BANK_CONNECTIONS.md](BANK_CONNECTIONS.md).
 
 Architecture: [ARCHITECTURE.md](ARCHITECTURE.md). This checklist tracks delivery;
 the architecture document defines the system boundaries.
@@ -37,7 +40,9 @@ Record any unavailable external check as pending instead of marking it complete.
 Firebase Admin verification and a development-only mock token endpoint are
 implemented. Milestone 1 now includes PostgreSQL/EF migrations, owner-scoped
 ledger endpoints, reports, readiness, and the persistent dashboard. Live Firebase
-sign-in remains unverified; synchronization is milestone 2.
+sign-in remains unverified. Milestone 2 synchronization and connection APIs are
+implemented with local checks; real Sandbox Link/reconnect and remote webhook
+delivery remain pending external configuration.
 
 ## Milestone 1: usable API with development data
 
@@ -158,18 +163,22 @@ category save/reset across restart, and both owners. Live Firebase project sign-
 remains pending credentials and a frontend token; Plaid is outside this milestone.
 Detailed evidence and reproducible commands: [LEDGER_API.md](LEDGER_API.md#verification).
 
-## Milestone 2: durable bank synchronization
+## Milestone 2: connect Plaid and synchronize bank data
+
+B07–B08 establish safe ingestion and durable work; B09 builds the actual Plaid
+connection. B10 keeps it current and B11 handles disconnect/deletion. Milestone 2
+includes a working Sandbox Link flow, not just synchronization of fake data.
 
 ### B07 — Apply provider changes to the ledger
 
-- [ ] Define the normalized sync batch between Connections and Ledger; keep Plaid
+- [x] Define the normalized sync batch between Connections and Ledger; keep Plaid
   DTOs out of Ledger and Insights.
-- [ ] Exercise it with a deterministic fake provider: added, modified, removed,
+- [x] Exercise it with a deterministic fake provider: added, modified, removed,
   and pending-to-posted transactions, plus balance changes.
-- [ ] Upsert by stable provider identifiers; reconcile pending-to-posted changes
+- [x] Upsert by stable provider identifiers; reconcile pending-to-posted changes
   without double counting or losing manual overrides.
-- [ ] Preserve account tombstones and ignore changes for locally deleted accounts.
-- [ ] Commit a complete fetched batch and its acknowledged cursor atomically;
+- [x] Preserve account tombstones and ignore changes for locally deleted accounts.
+- [x] Commit a complete fetched batch and its acknowledged cursor atomically;
   roll back on failure and resume from the last committed cursor.
 
 **Done when:** replaying a batch produces no duplicates, edits preserve overrides,
@@ -177,55 +186,94 @@ removals stop affecting reports, and a failed batch advances neither data nor cu
 
 ### B08 — Deliver durable background work
 
-**Decision to reconcile:** architecture AD-2 currently describes a PostgreSQL job
-queue while the v1 scope and other sections require RabbitMQ/MassTransit.
-Use RabbitMQ/MassTransit as the planning baseline and update AD-2 consistently
-before implementing this task, unless the user chooses otherwise.
+**Decision implemented:** RabbitMQ/MassTransit with the EF transactional outbox
+and inbox. Architecture AD-2 now consistently describes that transport.
 
-- [ ] Add RabbitMQ to Compose and MassTransit in Infrastructure, hosted in the
+- [x] Add RabbitMQ to Compose and MassTransit in Infrastructure, hosted in the
   existing backend process.
-- [ ] Add the PostgreSQL transactional outbox and consumer inbox migrations.
-- [ ] Persist a sync run and `SyncConnectionRequested` in one transaction; consume
+- [x] Add the PostgreSQL transactional outbox and consumer inbox migrations.
+- [x] Persist a sync run and `SyncConnectionRequested` in one transaction; consume
   it using the B07 ingestion path.
-- [ ] Commit ledger changes, cursor, sync status, and `TransactionsChanged`
+- [x] Commit ledger changes, cursor, sync status, and `TransactionsChanged`
   together. Keep secrets and full financial payloads out of messages.
-- [ ] Coalesce requests and serialize synchronization per connection, including
+- [x] Coalesce requests and serialize synchronization per connection, including
   duplicate deliveries and process restarts.
 
 **Done when:** a broker outage retains committed work for later delivery, a
 restart does not lose work, and duplicate commands neither overlap syncs nor
 duplicate transactions. Read endpoints keep using local data.
 
-### B09 — Link Plaid Sandbox securely
+### B09 — Build the Plaid connection and link Sandbox accounts
 
-**Inputs needed:** Plaid Sandbox application credentials and a local secret-store
-choice. Keep credentials out of this checklist and source control.
+**Inputs still needed:** real Plaid Sandbox application credentials. The local
+store is implemented with persistent Data Protection-encrypted files; keep
+credentials out of this checklist and source control.
 
-- [ ] Choose and configure local secret storage before persisting access tokens;
-  store only secret references in PostgreSQL.
-- [ ] Implement link-token creation, public-token exchange, connection listing,
-  and reconnect/update-mode Link flow from the architecture's endpoint list.
-- [ ] Request the initial 180-day history window, accepting provider limitations.
-- [ ] Save owned connection metadata and enqueue initial synchronization through
-  B08; handle partial exchange/secret/database failures without losing track of
-  credentials or silently creating orphaned connections.
-- [ ] Map provider fields/categories and sign conventions into the canonical
-  ledger and use `/transactions/sync` with pagination and saved cursors.
-- [ ] Restart a paginated fetch from the saved cursor when the provider invalidates
+- [ ] Configure backend-only Plaid client ID, Sandbox secret, and Sandbox API
+  base URL for host and Compose runs. Validate configuration when Plaid is
+  enabled; keep secrets out of checked-in settings and frontend `VITE_*` values.
+- [x] Add a narrow Plaid HTTP client in Infrastructure using .NET `HttpClient`
+  and JSON support, with timeouts, cancellation, and sanitized provider errors.
+  Connections owns provider DTOs; reuse the B07 ingestion and B08 work paths.
+- [x] Choose and configure persistent local secret storage before exchanging
+  tokens. Add `secret_reference` and `sync_cursor` to the existing connection
+  schema; PostgreSQL stores the reference, never the access token.
+- [x] Implement authenticated `POST /api/v1/connections/link-token`, calling
+  Plaid `/link/token/create` with the verified UID as `user.client_user_id`,
+  `products: ["transactions"]`, US/en settings, and
+  `transactions.days_requested: 180`. Return the Link token and expiration;
+  configure the webhook URL for B10 and an OAuth redirect when needed.
+- [x] Implement authenticated `POST /api/v1/connections/exchange-token`, accepting
+  the Link `public_token` and calling `/item/public_token/exchange` server-side.
+  Store the resulting access token in the secret store and derive Item/institution
+  metadata from Plaid rather than trusting browser-supplied ownership or metadata.
+- [x] Commit owned connection metadata, the initial sync run, and the B08 outbox
+  command together; return the connection ID and sync status promptly. Handle
+  repeated requests and partial exchange/secret/database failures without losing
+  track of credentials or silently creating orphaned connections. Do not blindly
+  retry token exchange as if it were an idempotent read.
+- [x] Implement `GET /api/v1/connections` scoped to the verified owner, including
+  connections whose initial sync has not created accounts yet. Return institution,
+  connection/sync status, last successful sync, and sanitized error metadata.
+- [x] Implement owned `POST /api/v1/connections/{id}/reconnect` to create an
+  update-mode Link token using the stored access token. Document completion and
+  resuming sync against the same Item without another public-token exchange;
+  reauthentication must retain ledger history and manual overrides. Unknown and
+  foreign connection IDs both return 404.
+- [x] Map provider fields/categories and sign conventions into the canonical
+  ledger and use `/transactions/sync` with pagination and saved cursors. Treat
+  initial history as asynchronous; an initially empty response does not mean the
+  requested history has finished loading. Accept provider history limitations.
+- [x] Restart a paginated fetch from the saved cursor when the provider invalidates
   that pagination sequence; acknowledge only a complete successful batch.
+- [x] Publish the connection DTOs and request/response examples in OpenAPI, then
+  wire the dashboard's Connect action to Plaid Link: request a Link token, open
+  Link, send `onSuccess`'s public token to the exchange endpoint, and display sync
+  progress before refreshing the existing ledger/report reads. Handle Link exit,
+  failure, and reconnect; do not reuse the fixture connect/replay routes.
+- [ ] Verify the HTTP/secret/persistence flow with controlled provider responses,
+  including ownership and partial failures, then run one real Sandbox Link and
+  reconnect walkthrough. Record the live check as pending if credentials are
+  unavailable; fixture checks alone do not complete this task.
 
 **Done when:** an authenticated user links a Sandbox Item and sees its available
-history through the existing ledger/report endpoints. Tokens are absent from API
-responses, logs, messages, and database financial-connection records.
+history through the existing ledger/report endpoints. Access tokens and provider
+secrets are absent from API responses, logs, messages, and database
+financial-connection records.
+
+Provider contracts: [Link token creation](https://plaid.com/docs/api/link/),
+[public-token exchange](https://plaid.com/docs/api/items/#itempublic_tokenexchange),
+[update mode](https://plaid.com/docs/link/update-mode/), and
+[Transactions Sync](https://plaid.com/docs/api/products/transactions/#transactionssync).
 
 ### B10 — Receive updates and reconcile missed notifications
 
-- [ ] Verify webhook signatures before creating work; reject invalid notifications
+- [x] Verify webhook signatures before creating work; reject invalid notifications
   and resolve the connection from stored provider metadata.
-- [ ] Persist/coalesce webhook-triggered work and return promptly.
-- [ ] Schedule coalesced reconciliation at startup and at most hourly for connected
+- [x] Persist/coalesce webhook-triggered work and return promptly.
+- [x] Schedule coalesced reconciliation at startup and at most hourly for connected
   Items; request a non-blocking sync on stale reads using the same mechanism.
-- [ ] Add bounded retries, provider timeout/rate-limit handling, and visible
+- [x] Add bounded retries, provider timeout/rate-limit handling, and visible
   sanitized failures in sync runs and connection status.
 - [ ] Select and document an HTTPS development tunnel only when remote webhook
   delivery needs it; retain local webhook checks for routine development.
@@ -236,17 +284,30 @@ visible and recoverable. No paid refresh endpoint is needed.
 
 ### B11 — Disconnect and delete safely
 
-- [ ] Implement owned connection disconnection: revoke the provider connection
+- [x] Implement owned connection disconnection: revoke the provider connection
   when possible, remove its secret, mark it disconnected, and retain history.
-- [ ] Implement local account deletion: tombstone the account, remove its
+- [x] Implement local account deletion: tombstone the account, remove its
   transactions, and prevent reimport without disconnecting sibling accounts.
-- [ ] Coordinate lifecycle changes with queued/in-progress syncs so a late sync
+- [x] Coordinate lifecycle changes with queued/in-progress syncs so a late sync
   cannot recreate deleted data or restore a disconnected connection.
-- [ ] Make retries safe and expose a recoverable failure if provider revocation
+- [x] Make retries safe and expose a recoverable failure if provider revocation
   or secret cleanup cannot complete.
 
 **Done when:** disconnect preserves reports and history; account deletion removes
 its history and future batches cannot restore it. Ownership holds for both paths.
+
+### Recorded milestone 2 verification
+
+2026-10-02: B07–B11 implementation and controlled local checks are on
+`feat/milestone-2`. PostgreSQL/RabbitMQ checks cover ingestion replay/rollback,
+cursor atomicity, overrides, pagination mutation, owned Link/exchange/reconnect,
+encrypted receipt recovery, webhook verification, coalescing/follow-up, durable
+restart recovery, disconnect cleanup, and account tombstones. Compose readiness,
+frontend build/lint/auth/Plaid callback checks, and signed-in browser account/sync
+controls passed. A stopped broker retained work through an API restart and
+delivered it on recovery. Real Sandbox and remote HTTPS webhook checks remain
+pending; milestone 2 is not claimed externally complete. Reproducible commands
+and limitations: [BANK_CONNECTIONS.md](BANK_CONNECTIONS.md#verification--2026-10-02).
 
 ## Milestone 3: verify the complete backend and hand it off
 
@@ -276,8 +337,8 @@ have recorded passing evidence or explicitly unresolved blockers.
 | First usable milestone includes Plaid? | Milestone planning | Seeded API first approved and implemented; Plaid is milestone 2 |
 | Firebase project and local sign-in setup | B02 | Local mock implemented; project/credentials needed only for real Firebase verification |
 | Concrete category taxonomy and report date/refund semantics | B03–B06 | Existing fixed category lookup and report semantics implemented; see ledger handoff |
-| RabbitMQ versus PostgreSQL job queue conflict | B08 | RabbitMQ/MassTransit matches most of the approved architecture |
-| Plaid credentials and local secret storage | B09 | Sandbox; no paid plan; secret store chosen before token storage |
+| RabbitMQ versus PostgreSQL job queue conflict | B08 | Resolved: RabbitMQ/MassTransit 8.5.11, EF outbox/inbox; AD-2 updated |
+| Plaid credentials and local secret storage | B09 | Encrypted persistent files implemented; real Sandbox credentials still needed |
 | HTTPS tunnel | B10 | Choose only when remote webhooks are exercised |
 
 Budgets, investments, forecasting, custom categories, event sourcing, separate
