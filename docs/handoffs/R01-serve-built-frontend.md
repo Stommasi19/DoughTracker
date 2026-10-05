@@ -19,81 +19,91 @@ Reuse ASP.NET Core's static-file middleware and the existing Dockerfile. The
 current UI navigates with URL hashes, so no new router or SPA catch-all is needed.
 This packages the existing expense tracker for deployment without new features.
 
-## Your part — write the middleware calls
+## Your part — configuration wiring and ownership of the complete change
 
-Learning focus: middleware order and the boundary between public frontend files
-and authenticated financial endpoints.
+The agent implements most of this PR. Your bounded production-code assignment is
+the public Firebase configuration block in the new Docker frontend build stage.
+You also own the decisions, review and verification of the complete change;
+understanding is the goal, not a quota of handwritten code.
 
-1. Read `DoughTracker/src/API/Program.cs` around `app.UseAuthentication()` and
-   `app.UseAuthorization()`.
-2. Use [Microsoft's static-file documentation](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/static-files?view=aspnetcore-10.0)
-   to choose the two native middleware calls that resolve a default document and
-   serve files from `wwwroot`.
-3. Add them after the existing exception handler and before authentication and
-   authorization. Fill in this learning starter yourself:
+Learning focus: build-time frontend configuration versus backend runtime settings.
 
-```csharp
-// Resolve index.html for a request to the application root.
-app.____________();
-// Serve the frontend files from wwwroot.
-app.____________();
+1. Have the agent first prepare the frontend build stage and runtime copy.
+   Reserve the Firebase configuration block for you rather than asking it to
+   complete the whole Dockerfile. The agent may finish its other scoped work
+   while you implement that block.
+2. Inspect `DoughTrackerUI/src/firebase.ts`. Wire these four public build
+   arguments into the environment used by the frontend build:
+   `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`,
+   `VITE_FIREBASE_PROJECT_ID`, and `VITE_FIREBASE_APP_ID`. Explicitly disable
+   the frontend auth emulator. Keep private backend credentials out of the
+   browser bundle and image. You choose and write this configuration block;
+   use documentation or focused hints when needed.
+3. Review the entire small PR and trace React source → compiled output →
+   `wwwroot` → HTTP response. For every changed file, explain why it changed,
+   what consumes its output, and one relevant failure case. Trace touched
+   existing code as needed; no requirement to study the whole repository at once.
+4. Check how the build settings reach Firebase initialization, and why changing
+   them only at container startup cannot change an already-built bundle.
+   Diagnose one actual failure if one occurs, using your own hypothesis before
+   asking the agent. If none occurs, predict and check the missing-configuration
+   behavior using disposable local settings.
+5. Run the image yourself. Verify public HTML and an actual asset, then verify
+   unauthenticated `/api/v1/me` returns 401. Explain the middleware order and
+   why these requests take different paths. Assess the agent's test against
+   these outcomes before accepting its reported results.
 
-app.UseAuthentication();
-app.UseAuthorization();
-```
+Ask agents for explanations, implementation of the rest, focused hints and review.
+For your configuration block, ask for feedback on your attempt before a complete
+replacement. If you explicitly delegate that block too, use a concrete debugging
+or modification exercise afterward to verify your understanding.
 
-Allow roughly 15–20 minutes for the attempt; ask for a hint or review when needed.
-Keep all existing API authorization in place. Your checkpoint is to explain why
-someone who has not signed in can fetch `/` and JavaScript assets, while
-`/api/v1/me` still returns 401 without a token. Predict the result if the file
-middleware runs after authorization under this app's fallback policy.
+## Agent's part — implement the rest, test and document
 
-The implementation agent reviews your attempt before including it in the PR.
-If you explicitly ask the agent to finish this part, it can; return afterward
-and make or explain a small related variation yourself.
-
-## Agent's part — package and verify it
-
-Your agent-direction practice is to state the outcome and boundary in your own
-words before delegating. This is enough to start; use your existing workflow:
+Use your existing agent workflow with this scope:
 
 ```text
-Follow docs/handoffs/R01-serve-built-frontend.md. I'm writing the middleware
-calls in Program.cs. Handle the Docker packaging, focused regression check,
-and README instructions; review my middleware draft when available.
+Follow docs/handoffs/R01-serve-built-frontend.md. Implement the frontend build
+stage, runtime packaging, middleware, focused integration test and README.
+Reserve the public Firebase build-configuration block for me: tell me where it
+belongs and what it must accomplish, but let me write it. Preserve my work.
+Give a short plan first. After implementation, explain each file's purpose and
+the source-to-browser flow, review my block, and run the final checks.
 Keep API authentication intact and stay within this PR's scope.
-Give me a short plan, proceed with the authorized work, and return the diff
-plus the commands actually run and their results. Report pending checks.
+Return the diff, commands actually run, results and pending checks.
 ```
 
-After the handback, check that each changed file serves this task and personally
-confirm the public-page/401 boundary. Explain one implementation or verification
-choice you agree with, or give one specific correction if you find a gap. The
-goal is to exercise your judgment about the agent's work as well as write code.
-
-- Add a frontend build stage to `DoughTracker/Dockerfile`. Use a Node image
+- Add a frontend build stage to `DoughTracker/Dockerfile` using a Node image
   compatible with the lockfile, `npm ci`, and the existing `npm run build`.
-  Copy the generated `dist` into the final .NET image's `/app/wwwroot`.
-  Keep the existing .NET pins, non-root runtime user, entrypoint, and port.
-- Declare the four existing public Firebase values as build arguments in the
-  frontend stage: `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`,
-  `VITE_FIREBASE_PROJECT_ID`, and `VITE_FIREBASE_APP_ID`. Set the emulator flag
-  to false for this build. Keep private backend credentials outside the image
-  and browser bundle. Preserve the existing `.dockerignore` exclusions.
-- Use standard static-file behavior. No directory browsing, custom file
-  provider, fallback rewriting `/api` or `/webhooks`, or new dependencies.
-- Add one focused `FrontendHostingTests` regression check using the existing
-  `WebApplicationFactory` setup and temporary web-root files. Assert that `/`
-  serves the expected HTML, a known asset serves its expected content, and an
-  unauthenticated `/api/v1/me` is still 401. It should need neither a live Firebase
-  project nor PostgreSQL. Inspect the existing auth tests for setup patterns.
-- Document image build and smoke-check commands in README. Keep the host Vite
-  workflow available. Missing public Firebase configuration may leave sign-in
-  unavailable using the existing behavior; do not add a mock-login fallback.
+  It must not depend on host `node_modules` or host-built `dist`.
+- Reserve the four public Firebase build arguments and emulator setting for the
+  user. Review their wiring before the final build. Missing configuration must
+  retain the existing unavailable-sign-in behavior, not a mock-login fallback.
+- Copy compiled `dist` into the final .NET image's `/app/wwwroot`. Keep Node,
+  frontend source and build dependencies outside the final runtime image.
+  Preserve the .NET pins, non-root runtime user, secret directory, entrypoint,
+  port and `.dockerignore` exclusions.
+- Add `UseDefaultFiles()` followed by `UseStaticFiles()` after the exception
+  handler and before authentication/authorization, incorporating the user's
+  reviewed draft. Preserve all API authorization. No directory browsing, custom
+  provider, SPA catch-all, CORS changes, dependencies or unrelated refactoring.
+- Write one focused `FrontendHostingTests` regression check using the existing
+  `WebApplicationFactory` pattern and temporary web-root files. Assert expected
+  HTML from `/`, expected content from a known asset, and 401 from
+  unauthenticated `/api/v1/me`. No live Firebase, PostgreSQL or RabbitMQ is
+  required. Disable external integrations and startup data tasks explicitly;
+  clean up temporary files after disposing the host.
+- Document image build and smoke-check commands in README. Keep host Vite
+  development available. Run the focused checks and assembled-image checks;
+  explain results and remaining external prerequisites candidly.
+
+The user's configuration block and the agent's implementation stay in one PR.
+No manual-writing percentage is required. Completion includes the user's review
+and explanation, not merely the existence of generated files.
 
 Expected diff: `Program.cs`, the existing Dockerfile, one focused test file, and
-README. Your middleware edit and the agent's packaging belong in the same PR
-because together they produce a usable frontend-serving image.
+README. Your configuration block and the agent's implementation belong in the same PR
+because together they deliver a verifiable frontend-serving image.
 
 Excluded: Railway resource creation/deployment, provider credentials, real-bank
 mode, migration execution, token-volume setup, a separate frontend service,
@@ -154,9 +164,11 @@ acceptance require later release configuration and must remain pending until run
 
 ## Handback
 
-Show the user's middleware draft, review corrections, the final diff, and check
-results. Explain the middleware order and why each file changed. Include a short
-PR description about serving the production frontend from the API image.
+Show the user's configuration block, review corrections, the final diff, and
+check results. Record the user's implementation decisions and debugging
+explanation; generated code alone does not establish learning. Explain the
+build/runtime boundary, middleware order and why each file changed. Include a
+short PR description about serving the production frontend from the API image.
 Report missing external checks as pending. Do not claim Railway deployment or
 friends-and-family readiness from packaging checks alone.
 

@@ -14,6 +14,15 @@ delegates the scoped work, then assesses the actual diff and verification eviden
 Improve the workflow when results reveal a concrete gap; do not replace it or add
 ceremony just because a different prompting style exists.
 
+Agents implement most of the work. The user owns technical decisions and must
+understand the complete small PR: trace its behavior, explain each changed file,
+assess verification evidence, and diagnose or modify relevant behavior. Assign
+one bounded, meaningful production-code portion when hands-on implementation
+helps the learning target. Name its scope explicitly; neither token edits nor
+writing the entire feature should be the default. There is no manual-writing
+quota. Agents can explain, implement surrounding work and review; they give
+hints on the learner's reserved portion unless the user delegates it.
+
 ## Working loop
 
 1. When the user asks for the next task, read the current code, working-tree

@@ -99,10 +99,12 @@ For earlier large milestone PRs, learn one existing flow at a time. You do not
 need to understand the whole system in one sitting, and we will not assume an
 agent-built feature demonstrates your mastery of it.
 
-For the current R01 release handoff, start with ASP.NET Core middleware order:
-serve the public frontend while financial API endpoints remain authenticated.
-Reuse its file-serving and authentication checks. Leave AI-free exercises on
-financial writes or lifecycle behavior in disposable test environments.
+For the current R01 release handoff, agents implement most of the changes while
+you wire the public Firebase build settings. Trace the complete React-to-runtime
+flow, review each changed file, and verify public frontend access and protected
+API access. Understanding, debugging and assessing the solution matter more than
+the number of lines you type. Leave AI-free exercises on financial writes or
+lifecycle behavior in disposable test environments.
 
 For extra study, use the relevant MIT Missing Semester lecture alongside its
 matching task rather than collecting many courses. Keep some hands-on practice
