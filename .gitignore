@@ -31,3 +31,6 @@
 
 # Logs
 *.log
+/docs
+/skills
+AGENTS.md
