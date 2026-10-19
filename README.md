@@ -1,126 +1,82 @@
 # DoughTracker
-An evolving expense tracking application that will be expanded into a budgeting app -> an all in one finance application
 
-## Project documentation
+An expense tracker growing toward budgeting and a broader personal finance app.
 
-- [Small-PR planning and handoff workflow](docs/PM-WORKFLOW.md)
-- [Architecture handoff](docs/ARCHITECTURE.md)
-- [Frontend preview, screen map, and mock API](docs/FRONTEND_FOUNDATION.md)
-- [Firebase sign-in, local mock, and production setup](docs/FIREBASE_AUTH.md)
-- [Sequential backend tasks](docs/BACKEND-TASKS.md)
-- [Milestone 1 implementation plan](docs/MILESTONE-1-PLAN.md)
-- [Milestone 2 implementation plan](docs/MILESTONE-2-PLAN.md)
-- [Plaid connections, synchronization, and verification](docs/BANK_CONNECTIONS.md)
-- [Persistent ledger API and verification](docs/LEDGER_API.md)
+The planned product is a free, open-source application users install and run
+locally, supplying their own Plaid developer credentials for optional bank
+synchronization. The application and ledger stay on the user's computer; bank
+sync still contacts Plaid and the banks. No DoughTracker-operated backend or
+shared Plaid subscription is planned. Free live access depends on the installer's
+eligibility and Plaid's current terms; it is not guaranteed by local hosting.
 
-## Start the backend locally
+The existing rebuild plan now leads to local sign-in without required Firebase,
+a complete Docker Compose package, persistent data/secrets, backup and upgrade
+instructions, and OSS licensing/distribution. These are planned behaviors, not
+features of the current starter. The license is still to be selected and added
+before release. The separate shared-expense product is outside this project.
 
-Start Docker Desktop, then run from the repository root:
+The C# backend was restarted on October 5, 2026 so each new PR can introduce one
+small, understandable behavior. It currently contains one ASP.NET Core API
+project and a public health endpoint. The previous authentication, ledger,
+reports, bank connections, migrations and messaging implementation was removed.
+The React frontend remains in `DoughTrackerUI`; its application requests will
+fail until the corresponding backend routes return in later PRs.
 
-```sh
-MIGRATE_DATABASE=true SEED_DEVELOPMENT=true docker compose up --build -d
-curl --fail http://localhost:5084/health
-curl --fail http://localhost:5084/health/ready
-```
+## Run the backend
 
-The Docker API runs at `http://localhost:5084`. Its development OpenAPI document is at
-`http://localhost:5084/openapi/v1.json`. PostgreSQL stays on the Compose network
-and stores its data in a named volume. `docker compose down` stops the services
-and retains that data.
-
-`dotnet run` uses port 5083, so it can run alongside Docker. To change Docker's
-port, set `API_PORT` in a root `.env` file and use that port for frontend requests,
-OpenAPI, and health checks.
-
-Compose waits for PostgreSQL's health check before starting the API. See
-[Docker's startup-order documentation](https://docs.docker.com/compose/how-tos/startup-order/).
-
-The default database password is for this local setup. Set `POSTGRES_PASSWORD`
-in a root `.env` file before the first start if you want a different password.
-Changing it later also requires updating the existing database user's password.
-
-Milestone 1 persists an owner-scoped ledger in PostgreSQL using EF Core. The
-command above explicitly opts into Development migrations and fixtures for UIDs
-`alice` and `bob`; both flags default to false. It inserts missing fixture rows
-without resetting saved categories or account tombstones. Startup migrations and
-fixtures are rejected outside Development. `/health/ready` checks storage and
-required migrations separately from process liveness.
-
-For the dashboard, start the Firebase emulator, run `npm --prefix DoughTrackerUI
-run seed:users`, and sign in as `alice@example.test` or `bob@example.test` with
-local password `local-test-words-42`. Run the frontend with
-`API_PROXY_TARGET=http://127.0.0.1:5084 npm --prefix DoughTrackerUI run dev`.
-A new, unseeded identity sees an empty ledger. See the [API guide](docs/LEDGER_API.md)
-for the complete setup, custom seed UIDs, migrations, and PostgreSQL checks.
-The frontend remains a separate process. Compose now also starts RabbitMQ;
-Milestone 2 adds durable synchronization and Plaid Sandbox Link. Plaid is disabled
-until backend credentials are configured. Follow the [bank connection guide](docs/BANK_CONNECTIONS.md)
-for configuration, token storage, lifecycle routes, and recorded local checks.
-
-Follow the [backend task checklist](docs/BACKEND-TASKS.md) for implementation order,
-completion checks, and decisions needed along the way.
-
-## Backend authentication
-
-Local Development uses mock authentication by default, including Docker Compose.
-No Firebase project, emulator, or credentials are needed. Request a development
-token for any non-empty UID of at most 128 characters:
+Install the .NET SDK **10.0.401** pinned in `global.json`, then run from the root:
 
 ```sh
-curl --fail http://localhost:5084/api/v1/dev/token \
-  -H 'Content-Type: application/json' \
-  -d '{"uid":"local-user"}'
-```
-
-Copy the returned `idToken` and use it for authenticated requests:
-
-```sh
-curl --fail http://localhost:5084/api/v1/me \
-  -H 'Authorization: Bearer PASTE_ID_TOKEN_HERE'
-```
-
-The response is `{"uid":"local-user"}`. Use different UIDs to exercise different
-owners. Tokens expire after one hour; request a new one when they expire. Compose
-persists their protection keys in the token-store volume. These are backend-local protected tokens, not Firebase JWTs, so the
-frontend should send them directly as bearer tokens during mock development.
-
-The frontend local sign-in mock uses the Firebase Authentication emulator for
-the normal login UI, then obtains one of these backend tokens for its signed-in
-UID. See the [frontend authentication guide](docs/FIREBASE_AUTH.md).
-
-All application endpoints require authentication by default. `/health` and the
-development OpenAPI document remain public. The mock token endpoint exists only
-when mock mode is enabled in Development; enabling mock mode outside Development
-prevents startup. Real Firebase mode rejects mock tokens.
-
-To run with real Firebase Admin authentication, use a Firebase project with the
-frontend's sign-in providers enabled. Keep the service-account JSON outside this
-repository and follow [Firebase Admin setup](https://firebase.google.com/docs/admin/setup).
-For a host-based backend run:
-
-```sh
-Firebase__UseMockAuthentication=false \
-Firebase__ProjectId=YOUR_FIREBASE_PROJECT_ID \
-GOOGLE_APPLICATION_CREDENTIALS=/absolute/path/outside/repo/service-account.json \
+dotnet build DoughTracker/DoughTracker.slnx --configuration Release
 dotnet run --project DoughTracker/src/API/API.csproj
 ```
 
-This host run uses port 5083. Send the Firebase ID token obtained after frontend
-sign-in to `/api/v1/me`. The Admin SDK verifies the signature, issuer, project, and
-expiry; the owner UID comes from the verified token. See
-[Firebase ID token verification](https://firebase.google.com/docs/auth/admin/verify-id-tokens).
-Missing project configuration or credentials prevents real-mode startup.
-
-Host commands require the pinned .NET SDK 10.0.401 (runtime 10.0.12).
-Run the authentication regression checks with:
+The HTTP launch profile uses port 5083. In another terminal:
 
 ```sh
-dotnet test DoughTracker/tests/API.IntegrationTests/API.IntegrationTests.csproj
+curl --fail http://localhost:5083/health
 ```
 
-Without `DOUGHTRACKER_TEST_DATABASE`, the dedicated PostgreSQL check is explicitly
-skipped; the [API guide](docs/LEDGER_API.md#verification) runs the full suite.
-These checks exercise the HTTP pipeline, mock token expiry/tampering, production
-mock protection, and actual Admin SDK verification with locally generated signing
-keys and a simulated certificate response. A live-project sign-in check remains
-pending until Firebase credentials and a frontend ID token are available.
+Expected result: HTTP 200 with `{"status":"ok"}`. Routes such as
+`/api/v1/accounts`, `/api/v1/dev/token` and `/health/ready` return 404 for now.
+This starter needs no database, broker, Firebase credentials or Plaid credentials.
+Docker packaging is the next separate PR; the old Compose setup was removed.
+Old local containers were stopped, and their saved volumes were retained.
+
+The solution contains only `DoughTracker/src/API/API.csproj`. There are no extra
+NuGet packages, class libraries or test projects yet. Regression tests will be
+introduced with the first behavior that warrants them.
+
+## Rebuild and reference documentation
+
+Agents implement each scoped PR, including checks and documentation. The owner
+reviews the complete diff and explains the behavior before moving to the next
+slice; no coding portion is required.
+
+- [Current rebuild checklist](docs/BACKEND-TASKS.md)
+- [Small-PR workflow and current status](docs/PM-WORKFLOW.md)
+- [BR01: reset and API foundation](docs/handoffs/BR01-fresh-backend-foundation.md)
+- [BR02: package only the API in Docker](docs/handoffs/BR02-containerize-api.md)
+- [Architecture, local OSS release and durable boundaries](docs/ARCHITECTURE.md)
+- [Learning and comprehension guidance](docs/LEARNING-WITH-AI.md)
+
+The current checklist and architecture define the local OSS destination. The
+older milestone/API guides retain financial contracts and historical evidence;
+their mandatory Firebase, webhook-first and hosted-release assumptions are
+superseded. Their historical completion checks do not establish new API behavior:
+
+- [Legacy backend checklist](docs/LEGACY-BACKEND-TASKS.md)
+- [Milestone 1 reference plan](docs/MILESTONE-1-PLAN.md)
+- [Ledger contract, financial rules and old verification](docs/LEDGER_API.md)
+- [Milestone 2 reference plan](docs/MILESTONE-2-PLAN.md)
+- [Bank connection contracts and old verification](docs/BANK_CONNECTIONS.md)
+- [Frontend foundation](docs/FRONTEND_FOUNDATION.md)
+- [Frontend Firebase configuration](docs/FIREBASE_AUTH.md)
+
+The current Markdown plans and historical references are included for PR review.
+Existing ignore rules remain for other local docs/tools; Mentor interview records
+and preferences stay private outside this repository.
+
+Before public OSS distribution, the release-documentation slice must publish
+standalone installation/configuration/backup/upgrade instructions in tracked
+repository files so installation does not require reading development plans.
