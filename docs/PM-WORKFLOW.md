@@ -80,9 +80,10 @@ No previous chat or missing project-local PM skill is required.
 ## Mentor support for this rebuild
 
 The owner requested the sibling Mentor plugin for implementation planning on
-October 17, 2026. Use its explicitly invoked `mentor-interview` workflow for the
-current requirements-only plan. It reuses this checklist and the BR02 handoff;
-it does not start a second roadmap or authorize the implementation.
+October 17, 2026. Use its explicitly invoked `mentor-interview` workflow for explicit
+planning requests. It reuses this checklist and the active handoff; an interview
+alone does not authorize implementation. The October 19 confirmed scope includes
+BR02 implementation and planning-only handoffs for BR03/BR04.
 
 Keep the established allocation: agents implement scoped changes and checks;
 the owner reviews and explains the complete flow. No required coding portion
@@ -90,11 +91,10 @@ or automatic switch to manual coding. Mentor currently resolves Junior coaching
 with assisted coding; no preference has been saved or inferred from ability.
 Offer explanations, predictions and review support proportionate to each PR.
 
-The concrete next plan is recorded in BR02 under Implementation approach. Its
-Mentor confirmation is pending, independently of this PR's authorized commit and
-publication. BR01 owner review/merge remains the delivery prerequisite. After
-confirmation, finalize the plugin's private interview/plan artifacts outside Git.
-Do not publish the private transcript, preference files or machine-specific paths.
+The October 19 Mentor interview was confirmed by the owner. It outlines the full
+existing roadmap and details BR02–BR04. Private records remain outside Git.
+BR01 owner review was confirmed by the owner and PR #7 was verified merged at
+`979b51d`. BR02 implementation is authorized; BR03/BR04 remain planning-only.
 
 Mentor is a development aid, not a runtime dependency. Public repository plans
 must remain usable without that plugin. Future full interviews run only when
@@ -155,12 +155,12 @@ explicitly tracking the current Markdown references and AGENTS.md for review;
 leave the ignore rules intact for other local files. Private Mentor artifacts
 remain outside Git.
 
-Current task: [BR01 — reset and API foundation](handoffs/BR01-fresh-backend-foundation.md).
-Implementation, Release build/publish and HTTP checks passed using the pinned
-SDK in Docker. Owner review/comprehension and merge remain pending. Actual
-commands and limitations are recorded in that handoff. The next scoped
-handoff is [BR02 — containerize only the API](handoffs/BR02-containerize-api.md).
-Preparing BR02 does not implement it or establish owner understanding of BR01.
+Current task: [BR02 — API Docker image](handoffs/BR02-containerize-api.md), based
+on merged BR01 (`979b51d`, PR #7). BR01 review is owner-reported complete; historical
+verification stays in its handoff and is not an independent comprehension assessment.
+The next planned handoffs are [BR03](handoffs/BR03-postgresql-service.md) and
+[BR04](handoffs/BR04-database-readiness.md). Their preparation does not authorize
+implementation. Review/merge each delivered slice before starting the next.
 
 The old local API/PostgreSQL Compose services were stopped before their
 configuration was removed. Their saved volumes and local credentials were not
@@ -185,7 +185,8 @@ verification or owner comprehension is completed by this planning revision.
 
 ## Current learning baseline
 
-BR01 startup/request comprehension is pending owner review. Previous component
+BR01 owner review was confirmed October 19; no independent startup/request
+assessment was recorded. Previous component
 assignments are no longer active. Do not infer lack of ability from choosing a
 reset, and do not infer mastery from the generated starter or passing checks.
 

@@ -1,0 +1,20 @@
+# Allow only the API source and SDK pin into the root build context.
+**
+!global.json
+!DoughTracker/
+!DoughTracker/src/
+!DoughTracker/src/API/
+!DoughTracker/src/API/**
+
+# Exclusions below also apply inside the allowed API directory.
+**/bin
+**/obj
+**/.env
+**/.env.*
+**/appsettings.*.local.json
+**/*.p12
+**/*.pfx
+**/*.pem
+**/*.key
+**/secrets
+**/credentials

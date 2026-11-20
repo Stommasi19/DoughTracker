@@ -40,12 +40,34 @@ curl --fail http://localhost:5083/health
 Expected result: HTTP 200 with `{"status":"ok"}`. Routes such as
 `/api/v1/accounts`, `/api/v1/dev/token` and `/health/ready` return 404 for now.
 This starter needs no database, broker, Firebase credentials or Plaid credentials.
-Docker packaging is the next separate PR; the old Compose setup was removed.
+The API-only Docker image is available below; Compose remains a later slice.
 Old local containers were stopped, and their saved volumes were retained.
 
 The solution contains only `DoughTracker/src/API/API.csproj`. There are no extra
 NuGet packages, class libraries or test projects yet. Regression tests will be
 introduced with the first behavior that warrants them.
+
+## Run the API with Docker
+
+No host .NET SDK, database or provider credentials are needed. From the repository root:
+
+```sh
+docker build --tag doughtracker-rebuild:br02 --file DoughTracker/Dockerfile .
+docker run --detach --rm --name doughtracker-rebuild-br02 --publish 127.0.0.1:5084:8080 doughtracker-rebuild:br02
+curl --fail http://127.0.0.1:5084/health
+docker stop doughtracker-rebuild-br02
+```
+
+The build stage publishes the API; the final image contains the ASP.NET runtime
+and published application, running as a non-root user on container port 8080.
+Port 5084 is bound only to the local computer. `/api/v1/accounts` still returns
+404. This image does not include the frontend or database. If startup fails,
+inspect `docker logs doughtracker-rebuild-br02` and check the host/container port
+mapping. Choose another host port if 5084 is already occupied.
+
+Verified October 19: no-cache image build, health JSON (200), missing account
+route (404), runtime UID 1654 and loopback port binding passed. The verification
+container was stopped afterward; owner review remains pending.
 
 ## Rebuild and reference documentation
 

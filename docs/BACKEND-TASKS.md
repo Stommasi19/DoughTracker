@@ -47,12 +47,16 @@ for other local material; private Mentor artifacts stay outside Git.
 
 - [x] BR01 implementation — [reset and runnable API](handoffs/BR01-fresh-backend-foundation.md):
   Release build/publish and HTTP smoke checks passed with SDK 10.0.401 in Docker.
-- [ ] BR01 owner review — explain startup and the request flow, diagnose a
-  connection failure versus a missing route, then review/merge the reset.
-- [ ] BR02 — [containerize only the API](handoffs/BR02-containerize-api.md):
-  next handoff with a Mentor-assisted implementation approach drafted; Mentor
-  confirmation and BR01 owner review/merge remain pending. Preparing it does not
-  authorize implementation.
+- [x] BR01 owner review — owner confirmed review October 19, 2026.
+  [PR #7](https://github.com/Stommasi19/DoughTracker/pull/7) merged as
+  `979b51d074fef5285e6f439c13319e5d41179fd7`. No independent comprehension assessment is implied.
+- [x] BR02 implementation — [API Docker image](handoffs/BR02-containerize-api.md):
+  no-cache image build and runtime checks passed October 19; owner review/merge
+  remain pending in handoff.
+- [ ] BR03 — [PostgreSQL service](handoffs/BR03-postgresql-service.md): planned,
+  not authorized for implementation; follows BR02 review/merge.
+- [ ] BR04 — [API database readiness](handoffs/BR04-database-readiness.md): planned,
+  not authorized for implementation; follows BR03 review/merge.
 
 BR01 intentionally removes the legacy source, migrations, tests and container
 configuration. The only supported route is public `GET /health`. The retained
@@ -64,7 +68,8 @@ new migrations to the old schema accidentally.
 ## Delivery sequence
 
 Continue the existing rebuild in this order, reassessing after every review.
-Only BR02 has an active next handoff. Each semicolon-separated behavior below
+BR02 is the active implementation handoff; BR03 and BR04 are detailed future
+handoffs. Each semicolon-separated behavior below
 is a candidate for its own PR, not one large milestone implementation. Introduce
 test projects and class libraries when actual behaviors need them. Preserve
 money correctness, ownership and recovery checks with their behavior.
@@ -94,6 +99,82 @@ money correctness, ownership and recovery checks with their behavior.
 | Local operations | Backup/restore database plus token keys/secrets; explicit upgrade/migration procedure; recovery notes, separately | Durable data across installation changes |
 | OSS distribution | Choose/add OSS license; dependency notices/license checks; public setup/configuration/troubleshooting; reproducible source build and versioned release instructions | Installation and redistribution |
 | Release acceptance | Fresh-install walkthrough; local sign-in/dashboard; user-owned Plaid checks; restart/backup/restore and upgrade verification | Actual acceptance evidence |
+
+### Ordered PR outline — October 19 review
+
+Each numbered item is one candidate PR unless explicitly described as several.
+Only the next three have fixed BR identifiers; later boundaries remain provisional.
+Every implementation includes its relevant checks/docs and an owner review before
+moving on. A later row depends on earlier behavior it uses, not merely its number.
+
+1. **BR02:** API-only Docker image; non-root runtime and loopback health check.
+2. **BR03:** PostgreSQL-only Compose service; fresh volume and restart persistence.
+3. **BR04:** API connectivity/readiness; database outage and recovery.
+4. Local identity decision handoff: established mechanism, persistent storage,
+   bootstrap, session protection, CSRF if applicable, and recovery contract.
+5. First-run owner creation plus protected `/api/v1/me`; reject repeat bootstrap.
+6. Existing-owner sign-in; invalid credentials and protected-route rejection.
+7. Session expiry/sign-out; restart/key behavior and invalidated-session checks.
+8. Local owner recovery; preserve stable ledger ownership.
+9. Frontend local-session migration; sign-in/restoration/sign-out/unavailable states.
+10. Owned connection/account schema and opt-in two-owner fixtures.
+11. Owner-scoped account reads and DTO.
+12. Fixed categories and category lookup endpoint.
+13. Minimal transaction schema and deterministic fixtures.
+14. Owned paginated transaction reads with stable ordering.
+15. Date/account filters and validation.
+16. Category/currency filters.
+17. Search with literal wildcard escaping.
+18. Save owned category override, including effective-category reads.
+19. Clear override and restore provider classification.
+20. Pure financial eligibility/sign rules with decimal/refund examples.
+21. Period comparison and date boundaries.
+22. Individual chart/group calculations: separate PR per output contract.
+23. Summary report endpoint.
+24. Spending report endpoint.
+25. Dashboard compatibility verification and necessary frontend adaptation.
+26. One normalized fake ingestion batch.
+27. Replay/removal handling and idempotency.
+28. Pending replacement with override preservation.
+29. Atomic ledger/cursor commit and rollback verification.
+30. Durable dependency suitability decision: license, runtime cost and recovery contracts.
+31. Broker/transport setup.
+32. Transactional outbox scheduling.
+33. Consumer processing and retry/recovery.
+34. Coalescing and per-connection locking.
+35. Installation-owned Plaid disabled/Sandbox/live configuration and validation.
+36. Persistent encrypted token/key storage and restart recovery.
+37. Provider client boundary and controlled error mapping.
+38. Link token creation.
+39. Public-token exchange and durable connection creation.
+40. Paginated cursor sync using the proven ingestion/commit path.
+41. Reconnect/update mode without unnecessary new Items.
+42. Startup/hourly reconciliation through durable work; downtime catch-up.
+43. Asynchronous user-triggered sync action.
+44. UI freshness, sync status and recoverable errors.
+45. Disconnect and provider/local cleanup with retained history.
+46. Account tombstones preventing reimport.
+47. Serve built frontend from API.
+48. Full Compose assembly with private database/broker networking, persistent
+    ledger/identity/broker/token/key volumes and loopback API defaults.
+49. Packaged first-run integration and no-credentials empty/demo experience.
+50. Backup/restore of database plus matching tokens/keys.
+51. Explicit upgrade/migration and failure recovery procedure.
+52. Select/add OSS license (owner decision required).
+53. Dependency notices and redistribution/license verification.
+54. Public install/configuration/troubleshooting and operations documentation.
+55. Reproducible source build and versioned release instructions.
+56. Fresh-install/local sign-in/dashboard and saved-data offline acceptance.
+57. Installer-owned live Plaid acceptance; external eligibility checks stay pending
+    until actually performed, independently of Sandbox results.
+58. Restart, restore and upgrade release acceptance evidence.
+
+Keep setup-abuse protection, owner isolation, session security, exact money,
+idempotency, cursor atomicity and recovery checks with the behavior introducing
+them. Do not defer essential protections into later hardening PRs. If a candidate
+still needs multiple review sessions, split by observable contract before coding.
+Budgets, manual entry/CSV, LAN/public hosting, optional inbound webhooks and the
+separate shared-expense product remain deferred as specified above.
 
 If identity needs database persistence, split database connectivity ahead of
 that identity write rather than inventing temporary credential storage. No

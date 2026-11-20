@@ -1,4 +1,0 @@
-@apiBaseUrl = http://localhost:5083
-
-GET {{apiBaseUrl}}/health
-Accept: application/json
