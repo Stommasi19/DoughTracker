@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import { onAuthStateChanged, signOut } from "firebase/auth";
-import type { User } from "firebase/auth";
 import App from "./App";
+import { saveSeenNotices } from "./reconnectNotices";
 import { AuthPage } from "./AuthPage";
-import { auth, authErrorMessage } from "./firebase";
+import { ApiError, request } from "./api";
+import type { UserProfile } from "./api";
 
 const initialTheme = () => {
   try {
@@ -16,8 +16,8 @@ const initialTheme = () => {
 };
 
 export default function Session() {
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(Boolean(auth));
+  const [user, setUser] = useState<UserProfile | null>(null);
+  const [loading, setLoading] = useState(true);
   const [sessionError, setSessionError] = useState("");
   const [theme, setTheme] = useState(initialTheme);
 
@@ -30,18 +30,19 @@ export default function Session() {
     }
   }, [theme]);
   useEffect(() => {
-    if (!auth) return;
-    return onAuthStateChanged(
-      auth,
-      (nextUser) => {
-        setUser(nextUser);
-        setLoading(false);
-      },
-      (error) => {
-        setSessionError(authErrorMessage(error));
-        setLoading(false);
-      },
-    );
+    const controller = new AbortController();
+    request<UserProfile>("/me", { signal: controller.signal })
+      .then((profile) => {
+        if (!controller.signal.aborted) setUser(profile);
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted || (error instanceof ApiError && error.status === 401)) return;
+        setSessionError("Could not reach the local DoughTracker API. Start it and retry.");
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+    return () => controller.abort();
   }, []);
 
   const toggleTheme = () => setTheme(theme === "light" ? "dark" : "light");
@@ -54,12 +55,15 @@ export default function Session() {
   if (user)
     return (
       <App
-        key={user.uid}
+        key={user.id}
+        userId={user.id}
         theme={theme}
         onToggleTheme={toggleTheme}
-        userLabel={user.displayName || user.email || "Personal workspace"}
+        userLabel={user.username}
         onSignOut={async () => {
-          if (auth) await signOut(auth);
+          await request("/auth/logout", { method: "POST" });
+          saveSeenNotices(user.id, []);
+          setUser(null);
         }}
       />
     );
@@ -68,6 +72,10 @@ export default function Session() {
       theme={theme}
       onToggleTheme={toggleTheme}
       sessionError={sessionError}
+      onAuthenticated={(profile) => {
+        saveSeenNotices(profile.id, []);
+        setUser(profile);
+      }}
     />
   );
 }

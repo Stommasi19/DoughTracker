@@ -1,104 +1,75 @@
 # DoughTracker
 
-An expense tracker growing toward budgeting and a broader personal finance app.
+DoughTracker is a locally run expense tracker. The current application uses
+FastAPI, PostgreSQL, and React. The eventual distribution will let each
+installation supply its own Plaid developer credentials for optional bank
+connections. The ledger stays on the user's computer and bank access uses
+Plaid's service.
 
-The planned product is a free, open-source application users install and run
-locally, supplying their own Plaid developer credentials for optional bank
-synchronization. The application and ledger stay on the user's computer; bank
-sync still contacts Plaid and the banks. No DoughTracker-operated backend or
-shared Plaid subscription is planned. Free live access depends on the installer's
-eligibility and Plaid's current terms; it is not guaranteed by local hosting.
+## Run locally
 
-The existing rebuild plan now leads to local sign-in without required Firebase,
-a complete Docker Compose package, persistent data/secrets, backup and upgrade
-instructions, and OSS licensing/distribution. These are planned behaviors, not
-features of the current starter. The license is still to be selected and added
-before release. The separate shared-expense product is outside this project.
+You need Python 3.14, Node.js with npm, and a running Docker daemon.
 
-The C# backend was restarted on October 5, 2026 so each new PR can introduce one
-small, understandable behavior. It currently contains one ASP.NET Core API
-project and a public health endpoint. The previous authentication, ledger,
-reports, bank connections, migrations and messaging implementation was removed.
-The React frontend remains in `DoughTrackerUI`; its application requests will
-fail until the corresponding backend routes return in later PRs.
-
-## Run the backend
-
-Install the .NET SDK **10.0.401** pinned in `global.json`, then run from the root:
+From the repository root, create the Python environment and local database
+configuration:
 
 ```sh
-dotnet build DoughTracker/DoughTracker.slnx --configuration Release
-dotnet run --project DoughTracker/src/API/API.csproj
+python3.14 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+cp .env.example .env
 ```
 
-The HTTP launch profile uses port 5083. In another terminal:
+Set `DB_PASSWORD` in `.env` before starting. Use a distinct container and volume
+name when starting a separate installation. FastAPI starts the PostgreSQL
+container if needed and keeps its data in the named Docker volume.
 
 ```sh
-curl --fail http://localhost:5083/health
+.venv/bin/python -m uvicorn DoughTracker.main:app --host 127.0.0.1 --port 5083
 ```
 
-Expected result: HTTP 200 with `{"status":"ok"}`. Routes such as
-`/api/v1/accounts`, `/api/v1/dev/token` and `/health/ready` return 404 for now.
-This starter needs no database, broker, Firebase credentials or Plaid credentials.
-The API-only Docker image is available below; Compose remains a later slice.
-Old local containers were stopped, and their saved volumes were retained.
-
-The solution contains only `DoughTracker/src/API/API.csproj`. There are no extra
-NuGet packages, class libraries or test projects yet. Regression tests will be
-introduced with the first behavior that warrants them.
-
-## Run the API with Docker
-
-No host .NET SDK, database or provider credentials are needed. From the repository root:
+In another terminal:
 
 ```sh
-docker build --tag doughtracker-rebuild:br02 --file DoughTracker/Dockerfile .
-docker run --detach --rm --name doughtracker-rebuild-br02 --publish 127.0.0.1:5084:8080 doughtracker-rebuild:br02
-curl --fail http://127.0.0.1:5084/health
-docker stop doughtracker-rebuild-br02
+cd DoughTrackerUI
+npm ci
+npm run dev
 ```
 
-The build stage publishes the API; the final image contains the ASP.NET runtime
-and published application, running as a non-root user on container port 8080.
-Port 5084 is bound only to the local computer. `/api/v1/accounts` still returns
-404. This image does not include the frontend or database. If startup fails,
-inspect `docker logs doughtracker-rebuild-br02` and check the host/container port
-mapping. Choose another host port if 5084 is already occupied.
+Open <http://127.0.0.1:5173>. Each local user can create a username and password.
+Usernames are case-insensitive and use 3–40 letters, numbers, dots, underscores,
+or hyphens. Passwords use 12–256 characters. The server stores a salted password
+hash and uses an HTTP-only cookie for sessions.
 
-Verified October 19: no-cache image build, health JSON (200), missing account
-route (404), runtime UID 1654 and loopback port binding passed. The verification
-container was stopped afterward; owner review remains pending.
+Vite proxies `/api` to FastAPI. Set `API_PROXY_TARGET` before starting Vite if
+FastAPI uses a different port. Use one browser hostname consistently because
+sessions are scoped to that hostname.
 
-## Rebuild and reference documentation
+For Plaid Sandbox, set `PLAID_ID` and `PLAID_SANDBOX_SECRET` in the backend
+`.env` and restart FastAPI. The Link token endpoint uses US Sandbox
+institutions with the Transactions product.
 
-Agents implement each scoped PR, including checks and documentation. The owner
-reviews the complete diff and explains the behavior before moving to the next
-slice; no coding portion is required.
+The Accounts tab checks saved connections when it opens and when you click
+**Refresh status**. If Plaid requires a new sign-in, the affected bank stays
+listed with **Reconnect required** and the app shows a notice. Transaction
+import and completing reauthorization in Plaid Link are separate work.
 
-- [Current rebuild checklist](docs/BACKEND-TASKS.md)
-- [Small-PR workflow and current status](docs/PM-WORKFLOW.md)
-- [BR01: reset and API foundation](docs/handoffs/BR01-fresh-backend-foundation.md)
-- [BR02: package only the API in Docker](docs/handoffs/BR02-containerize-api.md)
-- [Architecture, local OSS release and durable boundaries](docs/ARCHITECTURE.md)
-- [Learning and comprehension guidance](docs/LEARNING-WITH-AI.md)
+## Verify locally
 
-The current checklist and architecture define the local OSS destination. The
-older milestone/API guides retain financial contracts and historical evidence;
-their mandatory Firebase, webhook-first and hosted-release assumptions are
-superseded. Their historical completion checks do not establish new API behavior:
+```sh
+curl --fail http://127.0.0.1:5083/health
+cd DoughTrackerUI
+npm run build
+npm run lint
+npm run test:auth
+npm run test:plaid
+```
 
-- [Legacy backend checklist](docs/LEGACY-BACKEND-TASKS.md)
-- [Milestone 1 reference plan](docs/MILESTONE-1-PLAN.md)
-- [Ledger contract, financial rules and old verification](docs/LEDGER_API.md)
-- [Milestone 2 reference plan](docs/MILESTONE-2-PLAN.md)
-- [Bank connection contracts and old verification](docs/BANK_CONNECTIONS.md)
-- [Frontend foundation](docs/FRONTEND_FOUNDATION.md)
-- [Frontend Firebase configuration](docs/FIREBASE_AUTH.md)
+The auth check runs against a running API and creates two disposable local
+profiles. Use a dedicated database volume for verification. Set
+`API_BASE_URL` if the verification API uses a different origin.
 
-The current Markdown plans and historical references are included for PR review.
-Existing ignore rules remain for other local docs/tools; Mentor interview records
-and preferences stay private outside this repository.
-
-Before public OSS distribution, the release-documentation slice must publish
-standalone installation/configuration/backup/upgrade instructions in tracked
-repository files so installation does not require reading development plans.
+To verify the full Sandbox flow, sign in, open **Accounts**, and use
+**Connect bank** with [Plaid's Sandbox test credentials](https://plaid.com/docs/sandbox/test-credentials/).
+Confirm that the bank and its accounts appear. Restart FastAPI with the same
+Postgres volume, then refresh **Accounts**. The same connection should appear
+without reopening Plaid Link.

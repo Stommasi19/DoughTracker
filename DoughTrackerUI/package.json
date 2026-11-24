@@ -4,22 +4,16 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --mode mock",
+    "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
     "test:auth": "node scripts/check-auth.mjs",
-    "test:plaid": "node scripts/check-plaid.mjs",
-    "seed:users": "node scripts/seed-local-users.mjs",
-    "dev:firebase": "vite"
+    "test:plaid": "node scripts/check-plaid.mjs"
   },
   "dependencies": {
-    "firebase": "^12.19.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
-  },
-  "overrides": {
-    "@grpc/grpc-js": "^1.14.5"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

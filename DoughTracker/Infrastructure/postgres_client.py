@@ -3,6 +3,7 @@ import docker
 from docker.errors import NotFound
 import psycopg
 import os
+from urllib.parse import quote
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -35,15 +36,15 @@ def ensure_postgres_running(restart_if_running: bool = True) -> str:
                 "POSTGRES_PASSWORD": os.environ["DB_PASSWORD"],
                 "POSTGRES_DB": os.environ["DB_NAME"],
             },
-            ports={f"{os.environ['DB_PORT']}/tcp": os.environ["DB_PORT"]},
+            ports={"5432/tcp": ("127.0.0.1", int(os.environ["DB_PORT"]))},
             volumes={os.environ["VOLUME_NAME"]: {"bind": "/var/lib/postgresql/data", "mode": "rw"}},
             restart_policy={"Name": "unless-stopped"},
             detach=True,
         )
 
     conn_str = (
-        f"postgresql://{os.environ['DB_USER']}:{os.environ['DB_PASSWORD']}"
-        f"@{os.environ['DB_HOST']}:{os.environ['DB_PORT']}/{os.environ['DB_NAME']}"
+        f"postgresql://{quote(os.environ['DB_USER'], safe='')}:{quote(os.environ['DB_PASSWORD'], safe='')}"
+        f"@{os.environ['DB_HOST']}:{os.environ['DB_PORT']}/{quote(os.environ['DB_NAME'], safe='')}"
     )
     _wait_for_db(conn_str)
     return conn_str

@@ -1,29 +1,28 @@
-from fastapi.concurrency import asynccontextmanager
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
-from .Infrastructure.postgres_client import ensure_postgres_running
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from starlette.middleware.trustedhost import TrustedHostMiddleware
+
+from .Infrastructure.postgres_client import ensure_postgres_running
+from .auth import router as auth_router
+from .database import Base
+from .plaid_routes import router as plaid_router
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 1. Start the container and build the engine locally inside lifespan
     pg_uri = ensure_postgres_running(restart_if_running=False)
-    sqlalchemy_uri = pg_uri.replace("postgresql://", "postgresql+psycopg://")
-
-    engine = create_engine(sqlalchemy_uri, pool_pre_ping=True)
-    session_factory = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
-
-    # 2. Store both on app.state instead of module globals
-    app.state.db_engine = engine
-    app.state.session_factory = session_factory
-    print(f"DoughTracker connected to: {sqlalchemy_uri}")
-
-    yield
-
-    # 3. Clean up the pool on shutdown
-    engine.dispose()
-    print("Database connection pool disposed.")
+    sqlalchemy_uri = pg_uri.replace("postgresql://", "postgresql+psycopg://", 1)
+    engine = create_engine(sqlalchemy_uri, pool_pre_ping=True, hide_parameters=True)
+    try:
+        Base.metadata.create_all(engine)
+        app.state.session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+        yield
+    finally:
+        engine.dispose()
 
 app = FastAPI(
     title="DoughTracker",
@@ -32,10 +31,22 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-def get_db(request: Request):
-    session_factory = request.app.state.session_factory
-    with session_factory() as session:
-        yield session
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
+app.include_router(auth_router)
+app.include_router(plaid_router)
+
+
+@app.middleware("http")
+async def require_same_origin_for_writes(request: Request, call_next):
+    origin = request.headers.get("origin")
+    if request.method not in {"GET", "HEAD", "OPTIONS"} and origin is not None:
+        expected_origin = f"{request.url.scheme}://{request.headers.get('host')}"
+        if origin != expected_origin:
+            return JSONResponse(status_code=403, content={"detail": "Use the local DoughTracker UI."})
+    response = await call_next(request)
+    if request.url.path.startswith("/api/v1/"):
+        response.headers["Cache-Control"] = "no-store"
+    return response
 
 @app.get("/")
 async def root():

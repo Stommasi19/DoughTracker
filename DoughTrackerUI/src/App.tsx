@@ -15,20 +15,22 @@ import {
   TransactionTable,
 } from "./components";
 import "./App.css";
-import { openLink } from "./plaid";
-import { auth } from "./firebase";
+import { AccountsPage } from "./AccountsPage";
 
 type Page = "expense-report" | "transactions" | "accounts";
-const currentPage = (): Page =>
-  ["transactions", "accounts"].includes(location.hash.slice(1))
-    ? (location.hash.slice(1) as Page)
-    : "expense-report";
+const currentPage = (): Page => {
+  const page = location.hash.slice(1);
+  return page === "expense-report" || page === "transactions" ? page : "accounts";
+};
+
 function App({
+  userId,
   theme,
   onToggleTheme,
   userLabel,
   onSignOut,
 }: {
+  userId: string;
   theme: string;
   onToggleTheme: () => void;
   userLabel: string;
@@ -46,13 +48,11 @@ function App({
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [currency, setCurrency] = useState("");
-  const [institutionId, setInstitutionId] = useState("");
   const [selectedTransaction, setSelectedTransaction] =
     useState<Transaction | null>(null);
   const [editingCategory, setEditingCategory] = useState("");
   const currentRequest = useRef("");
   const dialog = useRef<HTMLDialogElement>(null);
-  const linkAbort = useRef<AbortController | null>(null);
   const hasFilters = Boolean(
     accountId || categoryId || (currency && currency !== data?.defaultCurrency) || (page === "transactions" && search),
   );
@@ -68,17 +68,17 @@ function App({
 
   useEffect(() => {
     const change = () => {
-      const next = location.hash.slice(1) || "expense-report";
-      if (["expense-report", "transactions", "accounts"].includes(next)) {
-        setPage(next as Page);
-        setNotice("");
-        window.scrollTo(0, 0);
-      }
+      if (location.hash && !["#accounts", "#transactions", "#expense-report"].includes(location.hash)) return;
+      setPage(currentPage());
+      setNotice("");
+      setError("");
+      window.scrollTo(0, 0);
     };
     window.addEventListener("hashchange", change);
     return () => window.removeEventListener("hashchange", change);
   }, []);
   useEffect(() => {
+    if (page === "accounts") return;
     const controller = new AbortController();
     currentRequest.current = requestKey;
     loadWorkspace(new URLSearchParams(requestPath), { signal: controller.signal })
@@ -100,63 +100,11 @@ function App({
         if (!controller.signal.aborted) setCompletedRequest(requestKey);
       });
     return () => controller.abort();
-  }, [requestPath, requestKey]);
+  }, [page, requestPath, requestKey]);
   useEffect(() => {
     if (selectedTransaction && dialog.current && !dialog.current.open)
       dialog.current.showModal();
   }, [selectedTransaction]);
-  useEffect(() => () => linkAbort.current?.abort(), []);
-  const syncing = data?.connections.some(c => c.syncStatus === "requested" || c.syncStatus === "processing") ?? false;
-  useEffect(() => {
-    if (!syncing) return;
-    // ponytail: poll while work is pending; use push updates if many simultaneous dashboards need them.
-    const timer = window.setInterval(() => setRefresh(value => value + 1), 3000);
-    return () => window.clearInterval(timer);
-  }, [syncing]);
-  useEffect(() => {
-    if (new URL(location.href).searchParams.has("oauth_state_id")) location.hash = "accounts";
-  }, []);
-
-  async function connectBank(connectionId?: string) {
-    linkAbort.current?.abort();
-    const controller = new AbortController();
-    linkAbort.current = controller;
-    setBusy(true); setError("");
-    try {
-      const redirect = new URL(location.href).searchParams.has("oauth_state_id");
-      const saved = sessionStorage.getItem("doughtracker-link");
-      const owner = auth?.currentUser?.uid;
-      const stored = saved ? JSON.parse(saved) as { owner: string; token: string; connectionId?: string; publicToken?: string } : null;
-      const pending = stored && stored.owner === owner && (redirect || stored.publicToken) ? stored : null;
-      if (redirect && stored && stored.owner !== owner) throw new Error("Sign in with the user who started this bank connection.");
-      connectionId = pending?.connectionId ?? connectionId;
-      const token = pending?.token ?? (await request<{ linkToken: string }>(
-        connectionId ? `/connections/${connectionId}/reconnect` : "/connections/link-token",
-        { method: "POST", signal: controller.signal },
-      )).linkToken;
-      sessionStorage.setItem("doughtracker-link", JSON.stringify({ owner, token, connectionId, publicToken: pending?.publicToken }));
-      const result = pending?.publicToken ? { publicToken: pending.publicToken } :
-        await openLink(token, controller.signal, redirect ? location.href : undefined);
-      if (result) {
-        // Update mode can complete without a public token; it retains the existing access token.
-        if (result.publicToken !== null || connectionId) {
-          if (!connectionId) sessionStorage.setItem("doughtracker-link", JSON.stringify({ owner, token, publicToken: result.publicToken }));
-          await request(connectionId ? `/connections/${connectionId}/reconnect/complete` : "/connections/exchange-token", {
-            method: "POST", signal: controller.signal,
-            ...(!connectionId ? { body: JSON.stringify({ publicToken: result.publicToken }) } : {}),
-          });
-          setMonth(""); setAccountId(""); setCurrency("");
-          setRefresh(value => value + 1);
-          setNotice("Bank linked. Your transaction history is syncing.");
-        }
-      }
-      sessionStorage.removeItem("doughtracker-link");
-      if (redirect) history.replaceState(null, "", location.pathname + "#accounts");
-    } catch (reason) {
-      if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "Bank connection failed.");
-    } finally { if (!controller.signal.aborted) setBusy(false); }
-  }
-
   async function mutate(
     path: string,
     body: object | undefined,
@@ -220,9 +168,6 @@ function App({
     } finally { setBusy(false); }
   }
 
-  const connectedCount =
-    data?.connections.filter((connection) => connection.status === "connected")
-      .length ?? 0;
   const title =
     page === "expense-report"
       ? "Expense Report"
@@ -236,9 +181,6 @@ function App({
         ? "The details behind your spending."
         : "Your accounts, together in one place.";
   const report = data?.report;
-  const availableInstitutions = data?.connectableInstitutions.filter(institution =>
-    !data.connections.some(connection => connection.institutionId === institution.id && connection.status === "connected")) ?? [];
-  const selectedInstitution = availableInstitutions.find(institution => institution.id === institutionId) ?? availableInstitutions[0];
   const priorMonthName = report && new Date(`${report.previousDateFrom}T12:00:00`).toLocaleDateString("en-US", {
     month: "long",
   });
@@ -286,21 +228,11 @@ function App({
                       ? "Transactions"
                       : "Accounts"}
                 </span>
-                {item === "accounts" && data && (
-                  <span className="nav-count">{data.accounts.length}</span>
-                )}
               </a>
             ),
           )}
         </nav>
         <div className="rail-bottom">
-          <div className="connection-note">
-            <span className="status-dot" />
-            <span>{connectedCount} institutions connected</span>
-            <a href="#accounts" aria-label="View connection status">
-              <Icon name="chevron" size={16} />
-            </a>
-          </div>
           <button
             className="theme-button"
             onClick={onToggleTheme}
@@ -389,7 +321,9 @@ function App({
             </div>
           )}
         </div>
-        {!data ? (
+        {page === "accounts" ? (
+          <AccountsPage userId={userId} />
+        ) : !data ? (
           <div className="initial-state" role="status">
             <div className="loading-line" />
             <h2>
@@ -405,82 +339,80 @@ function App({
           </div>
         ) : (
           <>
-            {page !== "accounts" && (
-              <div className="filter-bar">
+            <div className="filter-bar">
+              <label className="filter-label">
+                <span>Period</span>
+                <select
+                  aria-label="Month"
+                  value={month || data.month}
+                  onChange={(event) => setMonth(event.target.value)}
+                >
+                  {[...new Set([data.month, ...data.months])].sort().reverse().map((item) => (
+                    <option key={item} value={item}>
+                      {monthName(item)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="filter-label">
+                <span>Account</span>
+                <select
+                  aria-label="Account"
+                  value={accountId}
+                  onChange={(event) => setAccountId(event.target.value)}
+                >
+                  <option value="">All accounts</option>
+                  {data.accounts.map((account) => (
+                    <option value={account.id} key={account.id}>
+                      {account.name} •• {account.mask ?? "—"}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {page === "transactions" && (
                 <label className="filter-label">
-                  <span>Period</span>
+                  <span>Category</span>
                   <select
-                    aria-label="Month"
-                    value={month || data.month}
-                    onChange={(event) => setMonth(event.target.value)}
+                    value={categoryId}
+                    onChange={(event) => setCategoryId(event.target.value)}
                   >
-                    {[...new Set([data.month, ...data.months])].sort().reverse().map((item) => (
-                      <option key={item} value={item}>
-                        {monthName(item)}
+                    <option value="">All categories</option>
+                    {data.categories.map((category) => (
+                      <option key={category.id} value={category.id}>
+                        {category.name}
                       </option>
                     ))}
                   </select>
                 </label>
-                <label className="filter-label">
-                  <span>Account</span>
-                  <select
-                    aria-label="Account"
-                    value={accountId}
-                    onChange={(event) => setAccountId(event.target.value)}
-                  >
-                    <option value="">All accounts</option>
-                    {data.accounts.map((account) => (
-                      <option value={account.id} key={account.id}>
-                        {account.name} •• {account.mask ?? "—"}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                {page === "transactions" && (
-                  <label className="filter-label">
-                    <span>Category</span>
-                    <select
-                      value={categoryId}
-                      onChange={(event) => setCategoryId(event.target.value)}
-                    >
-                      <option value="">All categories</option>
-                      {data.categories.map((category) => (
-                        <option key={category.id} value={category.id}>
-                          {category.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                )}
-                {page === "expense-report" && categoryId && (
-                  <span className="filter-chip">
-                    {
-                      data.categories.find(
-                        (category) => category.id === categoryId,
-                      )?.name
-                    }
-                  </span>
-                )}
-                {hasFilters && (
-                  <button className="text-button" onClick={clearFilters}>
-                    Clear filters
-                  </button>
-                )}
-                {data.currencies.length > 1 && (
-                  <label className="filter-label">
-                    <span>Currency</span>
-                    <select aria-label="Currency" value={currency || data.currency} onChange={event => setCurrency(event.target.value)}>
-                      {[...new Set([data.currency, ...data.currencies])].map(code => <option key={code} value={code}>{code}</option>)}
-                    </select>
-                  </label>
-                )}
-                <span className="filter-end" role="status">
-                  {loading
-                    ? "Updating…"
-                    : `${dateName(data.report.dateFrom)}–${dateName(data.report.daily.at(-1)!.date)}, ${data.report.dateFrom.slice(0, 4)}`}
+              )}
+              {page === "expense-report" && categoryId && (
+                <span className="filter-chip">
+                  {
+                    data.categories.find(
+                      (category) => category.id === categoryId,
+                    )?.name
+                  }
                 </span>
-              </div>
-            )}
+              )}
+              {hasFilters && (
+                <button className="text-button" onClick={clearFilters}>
+                  Clear filters
+                </button>
+              )}
+              {data.currencies.length > 1 && (
+                <label className="filter-label">
+                  <span>Currency</span>
+                  <select aria-label="Currency" value={currency || data.currency} onChange={event => setCurrency(event.target.value)}>
+                    {[...new Set([data.currency, ...data.currencies])].map(code => <option key={code} value={code}>{code}</option>)}
+                  </select>
+                </label>
+              )}
+              <span className="filter-end" role="status">
+                {loading
+                  ? "Updating…"
+                  : `${dateName(data.report.dateFrom)}–${dateName(data.report.daily.at(-1)!.date)}, ${data.report.dateFrom.slice(0, 4)}`}
+              </span>
+            </div>
             <div
               className={loading ? "page-content updating" : "page-content"}
               aria-busy={loading}
@@ -697,157 +629,6 @@ function App({
                     <span>Purchases, refunds, income & transfers</span>
                   </div>
                 </section>
-              )}
-              {page === "accounts" && (
-                <>
-                  {data.plaidEnabled && <section className="panel connect-panel" aria-label="Connect a bank">
-                    <div className="section-heading"><div><h2>Connect a bank</h2><p>Securely link a Sandbox bank through Plaid.</p></div></div>
-                    <button className="button primary" disabled={busy || loading} onClick={() => void connectBank()}>
-                      <Icon name="plus" size={17} /> {busy ? "Connecting…" : new URL(location.href).searchParams.has("oauth_state_id") ? "Resume bank connection" : "Connect bank"}
-                    </button>
-                  </section>}
-                  {data.connectableInstitutions.length > 0 && (
-                    <section className="panel connect-panel" aria-label="Connect an account">
-                      <div className="section-heading">
-                        <div>
-                          <h2>Connect an account</h2>
-                          <p>Choose a mock bank to add sample accounts and transactions.</p>
-                        </div>
-                      </div>
-                      <form onSubmit={async event => {
-                        event.preventDefault();
-                        if (selectedInstitution) await mutate("/connections", { institutionId: selectedInstitution.id }, `${selectedInstitution.name} connected. Sample history added to your ledger.`);
-                      }}>
-                        <label>
-                          <span>Bank</span>
-                          <select value={selectedInstitution?.id ?? ""} onChange={event => setInstitutionId(event.target.value)} disabled={busy || loading || !availableInstitutions.length}>
-                            {!availableInstitutions.length && <option value="">All mock banks connected</option>}
-                            {availableInstitutions.map(institution => <option key={institution.id} value={institution.id}>{institution.name}</option>)}
-                          </select>
-                        </label>
-                        <button type="submit" className="button primary" disabled={busy || loading || !selectedInstitution}>
-                          <Icon name="plus" size={17} /> {busy ? "Connecting…" : "Connect account"}
-                        </button>
-                      </form>
-                    </section>
-                  )}
-                  <div className="accounts-heading">
-                    <span>
-                      {data.accounts.length} accounts across{" "}
-                      {data.connections.length} institutions
-                    </span>
-                    <span>Balances are last-known values</span>
-                  </div>
-                  {!data.accounts.length && <div className="empty-state"><h3>No accounts yet</h3><p>Your accounts will appear here after data is imported.</p></div>}
-                  {data.connections.map((connection) => {
-                    const institution = data.institutions.find(
-                      (institution) =>
-                        institution.id === connection.institutionId,
-                    )!;
-                    const accounts = data.accounts.filter(
-                      (account) => account.connectionId === connection.id,
-                    );
-                    const connected = connection.status === "connected";
-                    return (
-                      <section
-                        className="panel institution-panel"
-                        key={connection.id}
-                      >
-                        <div className="institution-heading">
-                          <span
-                            className={`institution-avatar ${institution.id}`}
-                          >
-                            {institution.initials}
-                          </span>
-                          <div>
-                            <h2>{institution.name}</h2>
-                            <p>
-                              {connection.lastSyncAt
-                                ? `Last successful sync ${new Date(connection.lastSyncAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`
-                                : "No successful sync recorded"}
-                            </p>
-                          </div>
-                          <span
-                            className={`connection-badge ${connected ? "" : "disconnected"}`}
-                          >
-                            <span className="status-dot" />
-                            {connection.status.replaceAll("_", " ").replace(/^./, letter => letter.toUpperCase())}
-                          </span>
-                        </div>
-                        {(connection.syncStatus === "failed" || connection.syncStatus === "requested" || connection.syncStatus === "processing") && <p role="status">{connection.syncStatus === "failed" ? "Sync failed. Retry or reconnect your bank." :
-                          connection.syncStatus === "requested" || connection.syncStatus === "processing" ? "Syncing transaction history…" : ""}</p>}
-                        {connection.lastErrorCode && <p role="status">{connection.status === "disconnecting" ? "Disconnect needs another attempt to finish." : "Your bank connection needs attention."}</p>}
-                        <div className="connection-actions">
-                          {connection.status === "attention_required" && connection.provider === "plaid" && <button className="button" disabled={busy} onClick={() => void connectBank(connection.id)}>Reconnect</button>}
-                          {data.syncEnabled && connection.status !== "disconnected" && connection.status !== "disconnecting" && <button className="button" disabled={busy || syncing} onClick={() => void mutate(`/connections/${connection.id}/sync`, undefined, "Sync requested.")}>Sync</button>}
-                          {connection.status !== "disconnected" && <button className="button" disabled={busy} onClick={() => {
-                            if (window.confirm("Disconnect this institution? Your account history will be retained.")) void mutate(`/connections/${connection.id}`, undefined, "Institution disconnected. History retained.", "DELETE");
-                          }}>{connection.status === "disconnecting" ? "Retry disconnect" : "Disconnect"}</button>}
-                        </div>
-                        <div className="account-list">
-                          {accounts.map((account) => (
-                            <div className="account-row" key={account.id}>
-                              <Icon name="accounts" size={22} />
-                              <div className="account-identity">
-                                <strong>{account.name}</strong>
-                                <span>
-                                  {(account.subtype || account.type).replaceAll("_", " ").replace(/^./, letter => letter.toUpperCase())}{" "}
-                                  · •• {account.mask ?? "—"}
-                                </span>
-                              </div>
-                              <div>
-                                <span>
-                                  {account.type === "credit"
-                                    ? "Amount owed"
-                                    : "Current balance"}
-                                </span>
-                                <strong>
-                                  {account.currentBalance === null
-                                    ? "Unavailable"
-                                    : money(
-                                        account.currentBalance,
-                                        account.currency,
-                                      )}
-                                </strong>
-                              </div>
-
-                              <div>
-                                <span>
-                                  {account.type === "credit"
-                                    ? "Available credit"
-                                    : "Available balance"}
-                                </span>
-                                <strong>
-                                  {account.availableBalance === null
-                                    ? "Not provided"
-                                    : money(
-                                        account.availableBalance,
-                                        account.currency,
-                                      )}
-                                </strong>
-                              </div>
-                              <button className="button" disabled={busy} aria-label={`Delete ${account.name}`} onClick={() => {
-                                if (window.confirm(`Delete ${account.name} and its transaction history? It will not be imported again.`)) {
-                                  setAccountId(""); void mutate(`/accounts/${account.id}`, undefined, "Account and its history deleted.", "DELETE");
-                                }
-                              }}>Delete</button>
-                            </div>
-                          ))}
-                        </div>
-                      </section>
-                    );
-                  })}
-                  <div className="account-explainer">
-                    <Icon name="leaf" size={23} />
-                    <div>
-                      <h3>Your account history</h3>
-                      <p>
-                        Account balances and imported history are stored in your
-                        personal ledger. Disconnecting a bank retains history; deleting an account removes its history and prevents future imports.
-                      </p>
-                    </div>
-                  </div>
-                </>
               )}
             </div>
             <footer className="page-footer">

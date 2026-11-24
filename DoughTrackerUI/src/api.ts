@@ -1,4 +1,13 @@
-import { apiToken } from "./firebase";
+export class ApiError extends Error {
+  readonly status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+export type UserProfile = { id: string; username: string };
 
 export type Category = { id: string; name: string };
 export type Institution = { id: string; name: string; initials: string };
@@ -98,20 +107,17 @@ export async function request<T>(
   options: RequestInit = {},
 ): Promise<T> {
   const headers = new Headers(options.headers);
-  headers.set("Content-Type", "application/json");
-  headers.set(
-    "Authorization",
-    `Bearer ${await apiToken(options.signal ?? undefined)}`,
-  );
+  if (options.body) headers.set("Content-Type", "application/json");
   const response = await fetch(`/api/v1${path}`, {
     ...options,
     headers,
   });
   if (!response.ok) {
     const detail = await response.json().catch(() => null);
-    throw new Error(
-      detail?.detail ?? detail?.title ??
-        "The API could not complete this request. Please try again.",
+    const message = detail?.detail ?? detail?.title;
+    throw new ApiError(
+      response.status,
+      typeof message === "string" ? message : "The API could not complete this request. Please try again.",
     );
   }
   const body = await response.text();
