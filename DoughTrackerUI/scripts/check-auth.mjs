@@ -1,62 +1,68 @@
 import assert from "node:assert/strict";
-import { initializeApp, deleteApp } from "firebase/app";
-import {
-  connectAuthEmulator,
-  initializeAuth,
-  inMemoryPersistence,
-  createUserWithEmailAndPassword,
-  deleteUser,
-  sendPasswordResetEmail,
-  signInWithEmailAndPassword,
-  signOut,
-} from "firebase/auth";
+import { randomUUID } from "node:crypto";
 
-// Only the local mock service is used; never read production credentials here.
-const app = initializeApp({
-  apiKey: "demo-doughtracker-key",
-  projectId: "demo-doughtracker",
-});
-const auth = initializeAuth(app, { persistence: inMemoryPersistence });
-connectAuthEmulator(auth, process.env.AUTH_EMULATOR_URL || "http://127.0.0.1:9099", { disableWarnings: true });
-const email = `check-${crypto.randomUUID()}@example.test`;
-const password = "local-test-words-42";
-try {
-  const { user } = await createUserWithEmailAndPassword(auth, email, password);
-  const uid = user.uid;
-  assert.equal(auth.currentUser?.uid, uid);
-  await signOut(auth);
-  assert.equal(auth.currentUser, null);
-  await assert.rejects(
-    signInWithEmailAndPassword(auth, email, "wrong-password"),
-  );
-  assert.equal(auth.currentUser, null);
-  await sendPasswordResetEmail(auth, email);
-  await signInWithEmailAndPassword(auth, email, password);
-  assert.equal(auth.currentUser?.uid, uid);
-  assert.ok(await auth.currentUser.getIdToken());
-  const api = process.env.API_BASE_URL || "http://127.0.0.1:5083";
-  assert.equal((await fetch(`${api}/api/v1/accounts`)).status, 401);
-  const response = await fetch(`${api}/api/v1/dev/token`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ uid }),
+const api = process.env.API_BASE_URL || "http://127.0.0.1:5083";
+const suffix = randomUUID().slice(0, 8);
+const alice = { username: `alice-${suffix}`, password: "local-verification-alice" };
+const bob = { username: `bob-${suffix}`, password: "local-verification-bob" };
+
+function request(path, { body, cookie, method = body ? "POST" : "GET", origin } = {}) {
+  const headers = new Headers();
+  if (body) headers.set("Content-Type", "application/json");
+  if (cookie) headers.set("Cookie", cookie);
+  if (origin) headers.set("Origin", origin);
+  return fetch(`${api}/api/v1${path}`, {
+    method,
+    headers,
+    body: body ? JSON.stringify(body) : undefined,
   });
-  assert.equal(response.status, 200);
-  const { idToken } = await response.json();
-  assert.equal(typeof idToken, "string");
-  const headers = { Authorization: `Bearer ${idToken}` };
-  const me = await fetch(`${api}/api/v1/me`, { headers });
-  assert.equal(me.status, 200);
-  assert.equal((await me.json()).uid, uid);
-  assert.equal(
-    (await fetch(`${api}/api/v1/accounts`, { headers })).status,
-    200,
-  );
-  await deleteUser(auth.currentUser);
-  assert.equal(auth.currentUser, null);
-  console.log(
-    "Local authentication check passed: sign-in lifecycle, ID token, protected API handoff, workspace authentication.",
-  );
-} finally {
-  await deleteApp(app);
 }
+
+async function register(credentials) {
+  const response = await request("/auth/register", {
+    body: credentials,
+    origin: new URL(api).origin,
+  });
+  assert.equal(response.status, 201, await response.clone().text());
+  const cookie = response.headers.get("set-cookie");
+  assert.ok(cookie?.includes("HttpOnly"));
+  assert.ok(cookie?.includes("SameSite=strict"));
+  return { profile: await response.json(), cookie: cookie.split(";", 1)[0] };
+}
+
+assert.equal((await request("/me")).status, 401);
+const first = await register(alice);
+const second = await register(bob);
+assert.equal(first.profile.username, alice.username);
+assert.equal(second.profile.username, bob.username);
+assert.notEqual(first.profile.id, second.profile.id);
+for (const { profile, cookie } of [first, second]) {
+  const response = await request("/me", { cookie });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), profile);
+}
+
+const duplicate = await request("/auth/register", {
+  body: { ...alice, username: alice.username.toUpperCase() },
+});
+assert.equal(duplicate.status, 409);
+const incorrect = await request("/auth/login", { body: { ...alice, password: "wrong" } });
+assert.equal(incorrect.status, 401);
+const login = await request("/auth/login", { body: alice, cookie: first.cookie });
+assert.equal(login.status, 200);
+assert.deepEqual(await login.json(), first.profile);
+assert.equal((await request("/me", { cookie: first.cookie })).status, 401);
+
+const cookie = login.headers.get("set-cookie").split(";", 1)[0];
+const crossOrigin = await request("/auth/logout", {
+  method: "POST",
+  cookie,
+  origin: "http://127.0.0.1:9999",
+});
+assert.equal(crossOrigin.status, 403);
+assert.equal((await request("/me", { cookie })).status, 200);
+
+assert.equal((await request("/auth/logout", { method: "POST", cookie })).status, 204);
+assert.equal((await request("/me", { cookie })).status, 401);
+assert.equal((await request("/me", { cookie: second.cookie })).status, 200);
+console.log("Local auth passed: separate profiles, duplicate username, wrong password, session rotation, origin check, and sign-out isolation.");

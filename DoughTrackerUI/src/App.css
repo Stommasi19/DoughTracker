@@ -951,6 +951,30 @@ select {
 .institution-panel {
   margin-bottom: var(--space-xl);
 }
+.bank-list-heading {
+  margin-block: var(--space-xl);
+}
+.linked-account-list {
+  margin: 0;
+  padding: 0 var(--space-xl);
+  list-style: none;
+}
+.linked-account-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-md);
+  padding-block: var(--space-md);
+}
+.linked-account-row + .linked-account-row {
+  border-top: 1px solid var(--border);
+}
+.linked-account-row span {
+  color: var(--muted);
+  font-size: var(--text-small);
+  text-transform: capitalize;
+}
 .institution-heading {
   display: flex;
   align-items: center;
@@ -1075,6 +1099,14 @@ select {
   font: 400 2rem/1.2 var(--font-heading);
   margin-top: var(--space-xl);
   overflow-wrap: anywhere;
+}
+.reconnect-dialog h2 {
+  margin-top: 0;
+}
+.reconnect-dialog p,
+.reconnect-dialog ul,
+.reconnect-dialog form {
+  margin-top: var(--space-lg);
 }
 .detail-amount {
   font-size: 2rem;
