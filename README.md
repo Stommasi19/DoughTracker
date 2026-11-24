@@ -68,6 +68,11 @@ The auth check runs against a running API and creates two disposable local
 profiles. Use a dedicated database volume for verification. Set
 `API_BASE_URL` if the verification API uses a different origin.
 
+GitHub Actions runs the frontend checks and the local-auth check on pull
+requests to `main` and after pushes to `main`. The auth job starts FastAPI
+with a temporary Postgres database on the runner. The workflow uses no
+Plaid credentials.
+
 To verify the full Sandbox flow, sign in, open **Accounts**, and use
 **Connect bank** with [Plaid's Sandbox test credentials](https://plaid.com/docs/sandbox/test-credentials/).
 Confirm that the bank and its accounts appear. Restart FastAPI with the same
